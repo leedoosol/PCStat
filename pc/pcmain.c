@@ -98,7 +98,7 @@ void record_pc_fn(unsigned int fd, struct file *filp, unsigned int count, unsign
 		/* check if the address stored in stack is inside the code segment */
 		if(mm->start_code <= value && value <= mm->end_code) {
 			/* store each PC to PC buffer */
-			sprintf(pc_buf + pc_buf_idx, "%p ", (void*)value);
+			sprintf(pc_buf + pc_buf_idx, "%p ", (void*)(value - mm->start_code));
 			pc_buf_idx = strlen(pc_buf);
 
 			num_addr++;
