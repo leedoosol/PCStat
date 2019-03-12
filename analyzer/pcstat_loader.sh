@@ -14,5 +14,5 @@ objdump -Ct $2 > symbol_table.tmp
 python pcstat.py $1 base_address.tmp symbol_table.tmp
 
 # 4. remove temporary files
-#rm base_address.tmp
-#rm symbol_table.tmp
+rm base_address.tmp
+rm symbol_table.tmp

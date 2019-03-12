@@ -31,6 +31,7 @@ class PCStat:
 
 		# get the symbol table from binary ELF
 		self.symbol_table = dict()
+		self.code_finish_address = 0
 		self.setup_symbol_table()
 
 
@@ -62,10 +63,16 @@ class PCStat:
 
 			# check if the symbol is code
 			if symbol[3] != ".text":
+				if symbol[3] == ".fini":
+					self.code_finish_address = int(symbol[0], 16)
+					print "CODE FINISH ADDRESS: %x" % self.code_finish_address
 				continue
 
 			# store to symbol table: offset - function name
-			self.symbol_table[int(symbol[0], 16)] = symbol[5]
+			symbol_name = symbol[5]
+			for i in range(6, len(symbol)):
+				symbol_name += " " + symbol[i]
+			self.symbol_table[int(symbol[0], 16)] = symbol_name
 
 	
 	# read a line from log file
@@ -92,16 +99,21 @@ class PCStat:
 			func_name = ''
 			for idx in range(len(keys) - 1):
 				if keys[idx + 1] > pc:
-					func_name = self.symbol_table[idx]
+					func_name = self.symbol_table[keys[idx]]
 					break
 				elif keys[idx + 1] == pc:
 					print "FUNCTION POINTER DETECTED for PC 0x%x" % (pc)
 					break
 
 			if func_name == '':
-				print "NO FUNCTION DETECTED for PC 0x%x" % (pc)
+				if self.code_finish_address > pc:
+					func_name = self.symbol_table[keys[len(keys) - 1]]
+				#else:
+					#print "NO FUNCTION DETECTED for PC 0x%x" % (pc)
 			else:
 				ret.append(func_name)
+
+		return ret
 
 
 
@@ -123,10 +135,11 @@ class Syscall:
 		string = str(self.timestamp)
 		string += "\t" + str(self.latency)
 		string += "\t" + self.filename
-		string += "\t" + self.pos
-		string += "\t" + self.size
+		string += "\t" + str(self.pos)
+		string += "\t" + str(self.size) + "\n"
+		string += "Program Contexts : \n"
 		for pc in self.pcs:
-			string += pc + " "
+			string += "\t\t" + pc + "\n"
 		f.write(string + "\n")
 
 
@@ -143,7 +156,7 @@ def pcs_into_string(pcs):
 # main function.
 def main():
 	pcstat = PCStat()
-	new_log = open("new.log", "w")
+	logs = dict()
 
 	while True:
 		line = pcstat.readline()
@@ -168,10 +181,10 @@ def main():
 		pcstat.pc_dict[pcs_string] = syscall_list
 
 		# write converted system call information to new file.
-		syscall.print_syscall(new_log)
+		f = open("logs/log_" + syscall.filename.split("/")[-1], "a")
+		syscall.print_syscall(f)
 
 	pcstat.file_close()
-	new_log.close()
 
 	# analyze given syscalls
 

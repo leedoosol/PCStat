@@ -75,7 +75,7 @@ void record_pc_fn(unsigned int fd, struct file *filp, unsigned int count, unsign
 	*/
 
 	/* only record I/O information for certain process */
-	if(strcmp(current->comm, "vi") != 0)
+	if(strcmp(current->comm, "pc_test") != 0)
 		return;
 
 	/* skip if the I/O size is 0 */
