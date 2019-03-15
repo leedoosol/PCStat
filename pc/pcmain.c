@@ -30,12 +30,12 @@
 
 #include <linux/ktime.h>
 
-typedef void (*FuncType)(unsigned int, struct file*, unsigned int, unsigned long, loff_t, ktime_t, ktime_t);
+typedef void (*FuncType)(unsigned int, struct file*, unsigned int, unsigned int, unsigned long, loff_t, ktime_t, ktime_t);
 extern int set_record_syscall_pc (FuncType fn);
 
 #define TRUE 1
 #define FALSE 0
-#define ADDRESS_UNIT 8
+#define ADDRESS_UNIT 4
 #define NUM_RET_ADDR_THRESHOLD 10
 #define ValueOf(a) (*((unsigned long *) (a)))
 
@@ -57,8 +57,8 @@ struct file* filpscall; /* syscall file pointer */
 /**
  * record each PC's I/O information to log file
  */
-void record_pc_fn(unsigned int fd, struct file *filp, unsigned int count, unsigned long oldrsp,
-		  loff_t pos, ktime_t start, ktime_t end) {	
+void record_pc_fn(unsigned int fd, struct file *filp, unsigned int count, unsigned int type,
+		unsigned long oldrsp, loff_t pos, ktime_t start, ktime_t end) {	
 	char pc_buf[256]; /* buffer for pc addresses */
 	int pc_buf_idx = 0;
 	struct mm_struct *mm;
@@ -75,11 +75,11 @@ void record_pc_fn(unsigned int fd, struct file *filp, unsigned int count, unsign
 	*/
 
 	/* only record I/O information for certain process */
-	if(strcmp(current->comm, "pc_test") != 0)
+	if(strcmp(current->comm, "vi") != 0)
 		return;
 
 	/* skip if the I/O size is 0 */
-	if(pos == filp->f_pos)
+	if(count == 0)
 		return;
 
 #ifdef LOCK_ENABLE
@@ -121,7 +121,7 @@ void record_pc_fn(unsigned int fd, struct file *filp, unsigned int count, unsign
 	/* store the information of given PC's I/O */
 	//sprintf(buffer, "[PC%d] cmd:%s, d_iname:%s, pc:%s, timestamp:%lld, latency: %lld\n",
 	//	gsyscnt++, current->comm, path, pc_buf, start.tv64, end.tv64 - start.tv64);
-	sprintf(buffer, "%lld\t%lld\t%s\t%lld\t%lld\t%s\n", start.tv64, end.tv64 - start.tv64, path, pos, filp->f_pos - pos, pc_buf);
+	sprintf(buffer, "%lld\t%lld\t%s\t%u\t%lld\t%u\t%s\n", start.tv64, end.tv64 - start.tv64, path, type, pos, count, pc_buf);
 
 	/* free the temporary page */
 	free_page((unsigned long)tmp_page);

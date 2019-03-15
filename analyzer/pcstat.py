@@ -103,6 +103,7 @@ class PCStat:
 					break
 				elif keys[idx + 1] == pc:
 					print "FUNCTION POINTER DETECTED for PC 0x%x" % (pc)
+					func_name = "__FNCPTR_DETECTED__"
 					break
 
 			if func_name == '':
@@ -131,16 +132,18 @@ class Syscall:
 
 	
 	# prints the system call information to file.
-	def print_syscall(self, f):
+	def print_syscall(self, f, f_pc):
 		string = str(self.timestamp)
 		string += "\t" + str(self.latency)
 		string += "\t" + self.filename
 		string += "\t" + str(self.pos)
 		string += "\t" + str(self.size) + "\n"
-		string += "Program Contexts : \n"
+		f.write(string)
+
+		string = ""
 		for pc in self.pcs:
-			string += "\t\t" + pc + "\n"
-		f.write(string + "\n")
+			string += pc + "\n"
+		f_pc.write(string + "\n")
 
 
 
@@ -165,13 +168,6 @@ def main():
 
 		syscall = Syscall(line.split("\t"), pcstat);
 
-		# add syscall information to file_dict
-		syscall_list = list()
-		if syscall.filename in pcstat.file_dict:
-			syscall_list = pcstat.file_dict[syscall.filename]
-		syscall_list.append(syscall)
-		pcstat.file_dict[syscall.filename] = syscall_list
-
 		# add syscall information to pc_dict
 		syscall_list = list()
 		pcs_string = pcs_into_string(syscall.pcs)
@@ -182,7 +178,8 @@ def main():
 
 		# write converted system call information to new file.
 		f = open("logs/log_" + syscall.filename.split("/")[-1], "a")
-		syscall.print_syscall(f)
+		f_pc = open("logs/pc_" + syscall.filename.split("/")[-1], "a")
+		syscall.print_syscall(f, f_pc)
 
 	pcstat.file_close()
 
