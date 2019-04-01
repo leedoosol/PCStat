@@ -35,13 +35,22 @@ const struct file_operations generic_ro_fops = {
 
 EXPORT_SYMBOL(generic_ro_fops);
 
-/***** ysjin added for collecting I/O syscall information *****/
+/***** ysjin added for syscall latency *****/
 #include <asm/percpu.h>
 #include <asm/syscall.h>
 #include <asm/ptrace.h>
 #include <linux/ktime.h>
 
-typedef void (*FuncType)(unsigned int, struct file*, unsigned int, unsigned long, loff_t, ktime_t, ktime_t);
+#define IO_READ		0
+#define IO_PREAD64	1
+#define IO_READV	2
+#define IO_PREADV	3
+#define IO_WRITE	4
+#define IO_PWRITE64	5
+#define IO_WRITEV	6
+#define IO_PWRITEV	7
+
+typedef void (*FuncType)(unsigned int, struct file*, unsigned int, unsigned int, unsigned long, loff_t, ktime_t, ktime_t);
 FuncType record_syscall_pc = NULL;
 
 int set_record_syscall_pc (FuncType fn)
@@ -52,13 +61,13 @@ int set_record_syscall_pc (FuncType fn)
 EXPORT_SYMBOL(set_record_syscall_pc);
 
 int record_request_by_pc(unsigned int fd, struct file *file, unsigned int count,
-			 unsigned long oldrsp, loff_t pos, ktime_t start, ktime_t end)
+			 unsigned int type, unsigned long oldrsp, loff_t pos, ktime_t start, ktime_t end)
 {
 	if (fd >= 2)
 	{
 		if (record_syscall_pc != NULL)
 		{
-			record_syscall_pc(fd, file, count, oldrsp, pos, start, end);
+			record_syscall_pc(fd, file, count, type, oldrsp, pos, start, end);
 		}
 	}
 
@@ -658,7 +667,7 @@ SYSCALL_DEFINE3(read, unsigned int, fd, char __user *, buf, size_t, count)
 		if (uid == MY_UID) {
 			end = ktime_get();
 			oldrsp = current_pt_regs()->sp;
-			record_request_by_pc(fd, f.file, count, oldrsp, prev_pos, start, end);
+			record_request_by_pc(fd, f.file, count, IO_READ, oldrsp, prev_pos, start, end);
 		}
 	}
 	return ret;
@@ -690,7 +699,7 @@ SYSCALL_DEFINE3(write, unsigned int, fd, const char __user *, buf,
 		if (uid == MY_UID) {
 			end = ktime_get();
 			oldrsp = current_pt_regs()->sp;
-			record_request_by_pc(fd, f.file, count, oldrsp, prev_pos, start, end);
+			record_request_by_pc(fd, f.file, count, IO_WRITE, oldrsp, prev_pos, start, end);
 		}
 	}
 
@@ -726,7 +735,7 @@ SYSCALL_DEFINE4(pread64, unsigned int, fd, char __user *, buf,
 		if (uid == MY_UID) {
 			end = ktime_get();
 			oldrsp = current_pt_regs()->sp;
-			record_request_by_pc(fd, f.file, count, oldrsp, prev_pos, start, end);
+			record_request_by_pc(fd, f.file, count, IO_PREAD64, oldrsp, prev_pos, start, end);
 		}
 	}
 
@@ -762,7 +771,7 @@ SYSCALL_DEFINE4(pwrite64, unsigned int, fd, const char __user *, buf,
 		if (uid == MY_UID) {
 			end = ktime_get();
 			oldrsp = current_pt_regs()->sp;
-			record_request_by_pc(fd, f.file, count, oldrsp, prev_pos, start, end);
+			record_request_by_pc(fd, f.file, count, IO_PWRITE64, oldrsp, prev_pos, start, end);
 		}
 	}
 
@@ -1013,7 +1022,7 @@ SYSCALL_DEFINE3(readv, unsigned long, fd, const struct iovec __user *, vec,
 		if (uid == MY_UID) {
 			end = ktime_get();
 			oldrsp = current_pt_regs()->sp;
-			record_request_by_pc(fd, f.file, vlen, oldrsp, prev_pos, start, end);
+			record_request_by_pc(fd, f.file, vlen, IO_READV, oldrsp, prev_pos, start, end);
 		}
 	}
 
@@ -1049,7 +1058,7 @@ SYSCALL_DEFINE3(writev, unsigned long, fd, const struct iovec __user *, vec,
 		if (uid == MY_UID) {
 			end = ktime_get();
 			oldrsp = current_pt_regs()->sp;
-			record_request_by_pc(fd, f.file, vlen, oldrsp, prev_pos, start, end);
+			record_request_by_pc(fd, f.file, vlen, IO_WRITEV, oldrsp, prev_pos, start, end);
 		}
 	}
 
@@ -1095,7 +1104,7 @@ SYSCALL_DEFINE5(preadv, unsigned long, fd, const struct iovec __user *, vec,
 		if (uid == MY_UID) {
 			end = ktime_get();
 			oldrsp = current_pt_regs()->sp;
-			record_request_by_pc(fd, f.file, vlen, oldrsp, prev_pos, start, end);
+			record_request_by_pc(fd, f.file, vlen, IO_PREADV, oldrsp, prev_pos, start, end);
 		}
 	}
 
@@ -1135,7 +1144,7 @@ SYSCALL_DEFINE5(pwritev, unsigned long, fd, const struct iovec __user *, vec,
 		if (uid == MY_UID) {
 			end = ktime_get();
 			oldrsp = current_pt_regs()->sp;
-			record_request_by_pc(fd, f.file, vlen, oldrsp, prev_pos, start, end);
+			record_request_by_pc(fd, f.file, vlen, IO_PWRITEV, oldrsp, prev_pos, start, end);
 		}
 	}
 

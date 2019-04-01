@@ -26,8 +26,9 @@ class PCStat:
 		# read log file
 		self.log_file = open(sys.argv[1], "r")
 
-		# get the base address of given binary ELF
+		# get the base address of binary
 		self.base_address = self.get_base_address()
+		print "BASE ADDRESS: %x" % self.base_address
 
 		# get the symbol table from binary ELF
 		self.symbol_table = dict()
@@ -49,7 +50,6 @@ class PCStat:
 		line = f.readline()
 		while line != "SYMBOL TABLE:\n":
 			line = f.readline()
-		
 
 		# read each table, get address of .text
 		while True:
@@ -59,7 +59,7 @@ class PCStat:
 
 			symbol = line.split()
 			if len(symbol) < 6:
-				break
+				continue
 
 			# check if the symbol is code
 			if symbol[3] != ".text":
@@ -68,11 +68,19 @@ class PCStat:
 					print "CODE FINISH ADDRESS: %x" % self.code_finish_address
 				continue
 
-			# store to symbol table: offset - function name
-			symbol_name = symbol[5]
-			for i in range(6, len(symbol)):
-				symbol_name += " " + symbol[i]
-			self.symbol_table[int(symbol[0], 16)] = symbol_name
+			if symbol[5] != ".text":
+				# store to symbol table: offset - function name
+				symbol_name = symbol[5]
+				for i in range(6, len(symbol)):
+					symbol_name += " " + symbol[i]
+				self.symbol_table[int(symbol[0], 16)] = symbol_name
+		#check symtab
+		print "############## symtbl check ###############"
+		keys = self.symbol_table.keys()
+		keys.sort()
+		for PC in keys:
+			print "0x%x - %s" % (PC, self.symbol_table[PC])
+		print "############################################"
 
 	
 	# read a line from log file
@@ -92,29 +100,32 @@ class PCStat:
 		keys.sort()
 
 		# convert every pc in pcs.
-		for pc in pcs:
+		for pc_offset in pcs:
 			# add base address to match the binary's address.
-			pc += self.base_address
+			pc = pc_offset + self.base_address
 
 			func_name = ''
 			for idx in range(len(keys) - 1):
 				if keys[idx + 1] > pc:
-					func_name = self.symbol_table[keys[idx]]
+					func_name = self.symbol_table[keys[idx]] + (" + 0x%x" % (pc - keys[idx]))
 					break
 				elif keys[idx + 1] == pc:
 					print "FUNCTION POINTER DETECTED for PC 0x%x" % (pc)
-					func_name = "__FNCPTR_DETECTED__"
+					func_name = "*FNCPTR_DETECTED*"
 					break
 
 			if func_name == '':
 				if self.code_finish_address > pc:
-					func_name = self.symbol_table[keys[len(keys) - 1]]
+					ret.append(self.symbol_table[keys[len(keys) - 1]] + (" + 0x%x" % (pc - keys[len(keys) - 1])))
 				#else:
 					#print "NO FUNCTION DETECTED for PC 0x%x" % (pc)
-			else:
+			elif func_name != "*FNCPTR_DETECTED*":
 				ret.append(func_name)
 
 		return ret
+
+
+type_dictionary = {0:"READ", 1:"PREAD64", 2:"READV", 3:"PREADV", 4:"WRITE", 5:"PWRITE64", 6:"WRITEV", 7:"PWRITEV"}
 
 
 
@@ -125,9 +136,10 @@ class Syscall:
 		self.timestamp = int(args[0])
 		self.latency = int(args[1])
 		self.filename = args[2]
-		self.pos = int(args[3])
-		self.size = int(args[4])
-		pcs = map(lambda x: int(x, 16), args[5].split())
+		self.type = int(args[3])
+		self.pos = int(args[4])
+		self.size = int(args[5])
+		pcs = map(lambda x: int(x, 16), args[6].split())
 		self.pcs = pcstat.convert_pc_to_symbol(pcs)
 
 	
@@ -136,14 +148,15 @@ class Syscall:
 		string = str(self.timestamp)
 		string += "\t" + str(self.latency)
 		string += "\t" + self.filename
+		string += "\t" + type_dictionary[self.type]
 		string += "\t" + str(self.pos)
 		string += "\t" + str(self.size) + "\n"
 		f.write(string)
 
-		string = ""
+		pc_string = ""
 		for pc in self.pcs:
-			string += pc + "\n"
-		f_pc.write(string + "\n")
+			pc_string += pc + "\n"
+		f_pc.write(pc_string + "\n")
 
 
 
