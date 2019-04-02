@@ -74,13 +74,6 @@ class PCStat:
 				for i in range(6, len(symbol)):
 					symbol_name += " " + symbol[i]
 				self.symbol_table[int(symbol[0], 16)] = symbol_name
-		#check symtab
-		print "############## symtbl check ###############"
-		keys = self.symbol_table.keys()
-		keys.sort()
-		for PC in keys:
-			print "0x%x - %s" % (PC, self.symbol_table[PC])
-		print "############################################"
 
 	
 	# read a line from log file
@@ -105,6 +98,11 @@ class PCStat:
 			pc = pc_offset + self.base_address
 
 			func_name = ''
+			
+			# check if the address is on upper side of actual code section.
+			if pc <= keys[0]:
+				continue			
+
 			for idx in range(len(keys) - 1):
 				if keys[idx + 1] > pc:
 					func_name = self.symbol_table[keys[idx]] + (" + 0x%x" % (pc - keys[idx]))
