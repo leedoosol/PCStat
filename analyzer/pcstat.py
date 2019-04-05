@@ -188,7 +188,7 @@ class Syscall:
 def pcs_into_string(pcs):
 	ret = ''
 	for pc in pcs:
-		ret += pc
+		ret += pc + ' '
 	return ret
 
 

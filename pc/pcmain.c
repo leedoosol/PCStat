@@ -194,7 +194,6 @@ void record_syscall_fn(unsigned int fd, struct file *filp, unsigned int count, u
 	tmp_page = (char*)__get_free_page(GFP_TEMPORARY);
 	path = d_path(&filp->f_path, tmp_page, PAGE_SIZE);
 
-	printk (KERN_INFO "[I/O syscall] record_syscall_fn occured\n");
 	/* store the information of given PC's I/O */
 	sprintf(buffer, "%lld\t%lld\t%s\t%u\t%lld\t%u\tPC_SIG %lx\n", start.tv64, end.tv64 - start.tv64, path, type, pos, count, pc_sig);
 
