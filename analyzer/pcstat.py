@@ -8,9 +8,10 @@ import sys
 			(timestamp, latency, filename, starting position, size, program contexts)
 		analyze by program context and file to catch file I/O pattern and latency.
 	
-	sys.argv[1]: log file name
-	sys.argv[2]: base address filename
-	sys.argv[3]: symbol table filename
+	sys.argv[1]: I/O syscall log file name
+	sys.argv[2]: PC syscall log file name
+	sys.argv[3]: base address filename
+	sys.argv[4]: symbol table filename
 '''
 
 # represents the PCStat itself.
@@ -35,16 +36,20 @@ class PCStat:
 		self.code_finish_address = 0
 		self.setup_symbol_table()
 
+		# get PC syscall log from file
+		self.pc_syscall_table = dict()
+		self.setup_pc_syscall_table()
+
 
 	# get base address from file
 	def get_base_address(self):
-		f = open(sys.argv[2], "r")
+		f = open(sys.argv[3], "r")
 		return int(f.readline().split()[2], 16)
 
 
 	# setup symbol table
 	def setup_symbol_table(self):
-		f = open(sys.argv[3], "r")
+		f = open(sys.argv[4], "r")
 
 		# skip line before table starts
 		line = f.readline()
@@ -74,6 +79,19 @@ class PCStat:
 				for i in range(6, len(symbol)):
 					symbol_name += " " + symbol[i]
 				self.symbol_table[int(symbol[0], 16)] = symbol_name
+	
+
+	# read PC syscall log from file
+	def setup_pc_syscall_table(self):
+		f = open(sys.argv[2], "r")
+
+		while True:
+			line = f.readline()
+			if not line:
+				break
+
+			line = line.split('\t')
+			self.pc_syscall_table[line[1].strip()] = line[0].split()
 
 	
 	# read a line from log file
@@ -137,7 +155,15 @@ class Syscall:
 		self.type = int(args[3])
 		self.pos = int(args[4])
 		self.size = int(args[5])
-		pcs = map(lambda x: int(x, 16), args[6].split())
+
+		pcs = args[6].split()
+		pc_string = ''
+		if pcs[0] == 'PC_SIG':
+			pc_splited = pcstat.pc_syscall_table[pcs[1]]
+		else:
+			pc_splited = pcs
+
+		pcs = map(lambda x: int(x, 16), pc_splited)
 		self.pcs = pcstat.convert_pc_to_symbol(pcs)
 
 	

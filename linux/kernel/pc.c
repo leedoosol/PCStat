@@ -90,79 +90,302 @@ static int file_write(char* buf, int len, struct file *filp)
 	return write_len;
 }
 
+typedef unsigned long (*PCFunc)(void);
+PCFunc record_pc = NULL;
+int set_record_pc (PCFunc fn)
+{
+	record_pc = fn;
+	return 0;
+}
+EXPORT_SYMBOL(set_record_pc);
+
+/**
+ * sys_get_pc: syscall for collecting current PCs
+ */
 asmlinkage unsigned long sys_get_pc()
 {
-	char buf[256];
-	int buf_idx = 0;
-	struct mm_struct *mm;
-	unsigned long stk_top, stk_bot, stk_cur, value, num_addr = 0;
-	struct vm_area_struct *vma;
-	unsigned long sp;
-	unsigned long sum_pc = 0;
-	struct file* pc_fp;
+	if (record_pc != NULL)
+		return record_pc();
 
-	memset(buf, 0x00, sizeof(char) * 256);
+	return 0;
+}
 
-	sp = current_pt_regs()->sp;
+/* I/O syscalls with PC signature */
 
-	/* get the addresses of code segment from stack. */
-	mm = current->mm;
-	stk_top = sp;
-	vma = find_vma(mm, stk_top);
-	stk_bot = vma->vm_end;
+#define IO_READ		0
+#define IO_PREAD64	1
+#define IO_READV	2
+#define IO_PREADV	3
+#define IO_WRITE	4
+#define IO_PWRITE64	5
+#define IO_WRITEV	6
+#define IO_PWRITEV	7
 
-	for (stk_cur = stk_top; stk_cur < stk_bot; stk_cur += ADDRESS_UNIT) {
-		value = ValueOf(stk_cur);
+typedef void (*PCFuncType)(unsigned int, struct file*, unsigned int, unsigned int, unsigned long, loff_t, ktime_t, ktime_t, long);
+PCFuncType record_syscall = NULL;
 
-		/* check if the address stored in stack is inside the code segment */
-		if (mm->start_code <= value && value <= mm->end_code) {
-			/* store each PC into buffer */
-			sprintf(buf + buf_idx, "%p ", (void *)(value - mm->start_code));
-			buf_idx = strlen(buf);
+int set_record_syscall (PCFuncType fn)
+{
+	record_syscall = fn;
+	return 0;
+}
+EXPORT_SYMBOL(set_record_syscall);
 
-			/* add PC up */
-			sum_pc += value - mm->start_code;
-
-			num_addr++;
-			if (num_addr > NUM_RET_ADDR_THRESHOLD)
-				break;
+static int record_request_without_pc(unsigned int fd, struct file *file, unsigned int count,
+			 unsigned int type, unsigned long oldrsp, loff_t pos, ktime_t start, ktime_t end, long pc_sig)
+{
+	if (fd >= 2)
+	{
+		if (record_syscall != NULL)
+		{
+			record_syscall(fd, file, count, type, oldrsp, pos, start, end, pc_sig);
 		}
 	}
 
-	if (num_addr != 0) {
-		/* add sum of pc to buffer */
-		sprintf(buf + buf_idx, "\t%lx", value);
-		
-		/* print pc information to file */
-		if ((pc_fp = file_open("/tmp/pc_syscall.log",
-								O_RDWR | O_LARGEFILE | O_CREAT | O_TRUNC, 0666)) == NULL) {
-			printk (KERN_INFO "[PC_syscall] file open error (/tmp/pc_syscall.log)\n");
-			return 0;
-		}
+	return 0;
+}
 
-		file_write(buf, strlen(buf), pc_fp);
-		file_close(pc_fp);
+static inline void fdput_pos(struct fd f)
+{
+	if (f.flags & FDPUT_POS_UNLOCK)
+		mutex_unlock(&f.file->f_pos_lock);
+	fdput(f);
+}
+
+SYSCALL_DEFINE4(read_pc, unsigned int, fd, char __user *, buf, size_t, count, long, pc_sig)
+{
+	struct fd f = __to_fd(__fdget_pos(fd));
+	ssize_t ret = -EBADF;
+	unsigned long oldrsp;
+	ktime_t start, end;
+
+	if (f.file) {
+		start = ktime_get();
+
+		loff_t pos = f.file->f_pos;
+		loff_t prev_pos = pos;
+		ret = vfs_read(f.file, buf, count, &pos);
+		if (ret >= 0)
+			f.file->f_pos = pos;
+		fdput_pos(f);
+
+		end = ktime_get();
+		oldrsp = current_pt_regs()->sp;
+		record_request_without_pc(fd, f.file, count, IO_READ, oldrsp, prev_pos, start, end, pc_sig);
 	}
-
-	return sum_pc;
+	return ret;
 }
 
 
+SYSCALL_DEFINE4(write_pc, unsigned int, fd, const char __user *, buf, size_t, count, long, pc_sig)
+{
+	struct fd f = __to_fd(__fdget_pos(fd));
+	ssize_t ret = -EBADF;
+	unsigned long oldrsp;
+	ktime_t start, end;
 
+	if (f.file) {
+		start = ktime_get();
 
+		loff_t pos = f.file->f_pos;
+		loff_t prev_pos = pos;
+		ret = vfs_write(f.file, buf, count, &pos);
+		if (ret >= 0)
+			f.file->f_pos = pos;
+		fdput_pos(f);
 
+		end = ktime_get();
+		oldrsp = current_pt_regs()->sp;
+		record_request_without_pc(fd, f.file, count, IO_WRITE, oldrsp, prev_pos, start, end, pc_sig);
+	}
 
+	return ret;
+}
 
+SYSCALL_DEFINE5(pread64_pc, unsigned int, fd, char __user *, buf, size_t, count, loff_t, pos, long, pc_sig)
+{
+	struct fd f;
+	ssize_t ret = -EBADF;
+	unsigned long oldrsp;
+	ktime_t start, end;
 
+	if (pos < 0)
+		return -EINVAL;
 
+	f = fdget(fd);
+	if (f.file) {
+		start = ktime_get();
 
+		loff_t prev_pos = pos;
+		ret = -ESPIPE;
+		if (f.file->f_mode & FMODE_PREAD)
+			ret = vfs_read(f.file, buf, count, &pos);
+		fdput(f);
 
+		end = ktime_get();
+		oldrsp = current_pt_regs()->sp;
+		record_request_without_pc(fd, f.file, count, IO_PREAD64, oldrsp, prev_pos, start, end, pc_sig);
+	}
 
+	return ret;
+}
 
+SYSCALL_DEFINE5(pwrite64_pc, unsigned int, fd, const char __user *, buf, size_t, count, loff_t, pos, long, pc_sig)
+{
+	struct fd f;
+	ssize_t ret = -EBADF;
+	unsigned long oldrsp;
+	ktime_t start, end;
 
+	if (pos < 0)
+		return -EINVAL;
 
+	f = fdget(fd);
+	if (f.file) {
+		start = ktime_get();
 
+		loff_t prev_pos = pos;
+		ret = -ESPIPE;
+		if (f.file->f_mode & FMODE_PWRITE)  
+			ret = vfs_write(f.file, buf, count, &pos);
+		fdput(f);
 
+		end = ktime_get();
+		oldrsp = current_pt_regs()->sp;
+		record_request_without_pc(fd, f.file, count, IO_PWRITE64, oldrsp, prev_pos, start, end, pc_sig);
+	}
+
+	return ret;
+}
+
+SYSCALL_DEFINE4(readv_pc, unsigned long, fd, const struct iovec __user *, vec, unsigned long, vlen, long, pc_sig)
+{
+	struct fd f = __to_fd(__fdget_pos(fd));
+	ssize_t ret = -EBADF;
+	unsigned long oldrsp;
+	ktime_t start, end;
+
+	if (f.file) {
+		start = ktime_get();
+
+		loff_t pos = f.file->f_pos;
+		loff_t prev_pos = pos;
+		ret = vfs_readv(f.file, vec, vlen, &pos);
+		if (ret >= 0)
+			f.file->f_pos = pos;
+		fdput_pos(f);
+
+		end = ktime_get();
+		oldrsp = current_pt_regs()->sp;
+		record_request_without_pc(fd, f.file, vlen, IO_READV, oldrsp, prev_pos, start, end, pc_sig);
+	}
+
+	if (ret > 0)
+		add_rchar(current, ret);
+	inc_syscr(current);
+	return ret;
+}
+
+SYSCALL_DEFINE4(writev_pc, unsigned long, fd, const struct iovec __user *, vec, unsigned long, vlen, long, pc_sig)
+{
+	struct fd f = __to_fd(__fdget_pos(fd));
+	ssize_t ret = -EBADF;
+	unsigned long oldrsp;
+	ktime_t start, end;
+
+	if (f.file) {
+		start = ktime_get();
+
+		loff_t pos = f.file->f_pos;
+		loff_t prev_pos = pos;
+		ret = vfs_writev(f.file, vec, vlen, &pos);
+		if (ret >= 0)
+			f.file->f_pos = pos;
+		fdput_pos(f);
+
+		end = ktime_get();
+		oldrsp = current_pt_regs()->sp;
+		record_request_without_pc(fd, f.file, vlen, IO_WRITEV, oldrsp, prev_pos, start, end, pc_sig);
+	}
+
+	if (ret > 0)
+		add_wchar(current, ret);
+	inc_syscw(current);
+	return ret;
+}
+
+static inline loff_t pos_from_hilo(unsigned long high, unsigned long low)
+{
+#define HALF_LONG_BITS (BITS_PER_LONG / 2)
+	return (((loff_t)high << HALF_LONG_BITS) << HALF_LONG_BITS) | low;
+}
+
+SYSCALL_DEFINE6(preadv_pc, unsigned long, fd, const struct iovec __user *, vec,
+		unsigned long, vlen, unsigned long, pos_l, unsigned long, pos_h, long, pc_sig)
+{
+	loff_t pos = pos_from_hilo(pos_h, pos_l);
+	struct fd f;
+	ssize_t ret = -EBADF;
+	unsigned long oldrsp;
+	ktime_t start, end;
+
+	if (pos < 0)
+		return -EINVAL;
+
+	f = fdget(fd);
+	if (f.file) {
+		start = ktime_get();
+
+		loff_t prev_pos = pos;
+
+		ret = -ESPIPE;
+		if (f.file->f_mode & FMODE_PREAD)
+			ret = vfs_readv(f.file, vec, vlen, &pos);
+		fdput(f);
+
+		end = ktime_get();
+		oldrsp = current_pt_regs()->sp;
+		record_request_without_pc(fd, f.file, vlen, IO_PREADV, oldrsp, prev_pos, start, end, pc_sig);
+	}
+
+	if (ret > 0)
+		add_rchar(current, ret);
+	inc_syscr(current);
+	return ret;
+}
+
+SYSCALL_DEFINE6(pwritev_pc, unsigned long, fd, const struct iovec __user *, vec,
+		unsigned long, vlen, unsigned long, pos_l, unsigned long, pos_h, long, pc_sig)
+{
+	loff_t pos = pos_from_hilo(pos_h, pos_l);
+	struct fd f;
+	ssize_t ret = -EBADF;
+	unsigned long oldrsp;
+	ktime_t start, end;
+
+	if (pos < 0)
+		return -EINVAL;
+
+	f = fdget(fd);
+	if (f.file) {
+		start = ktime_get();
+
+		loff_t prev_pos = pos;
+		ret = -ESPIPE;
+		if (f.file->f_mode & FMODE_PWRITE)
+			ret = vfs_writev(f.file, vec, vlen, &pos);
+		fdput(f);
+
+		end = ktime_get();
+		oldrsp = current_pt_regs()->sp;
+		record_request_without_pc(fd, f.file, vlen, IO_PWRITEV, oldrsp, prev_pos, start, end, pc_sig);
+	}
+
+	if (ret > 0)
+		add_wchar(current, ret);
+	inc_syscw(current);
+	return ret;
+}
 
 
 
