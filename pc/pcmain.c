@@ -64,7 +64,7 @@ extern int set_record_pc (PCFunc fn);
 #define TRUE 1
 #define FALSE 0
 #define ADDRESS_UNIT 4
-#define NUM_RET_ADDR_THRESHOLD 10
+#define NUM_RET_ADDR_THRESHOLD 20
 #define ValueOf(a) (*((unsigned long *) (a)))
 
 #define PRINT_SYSCALL

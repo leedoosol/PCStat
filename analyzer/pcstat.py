@@ -14,14 +14,26 @@ import sys
 	sys.argv[4]: symbol table filename
 '''
 
+IO_WRAP_DEGREE = 3
+
+# temporary function for storing PC.
+def pcs_into_string(pcs):
+	ret = ''
+	for pc in pcs:
+		ret += pc + '\t'
+	return ret
+
+
+
 # represents the PCStat itself.
 class PCStat:
 	# initialization of PCStat.
 	def __init__(self):
 		print "PCStat - initialization started"
 
-		self.file_dict = dict()
 		self.pc_dict = dict()
+		self.pc_counter = 0;
+		self.syscalls_per_pc = dict()
 		self.binary_name = sys.argv[1]
 
 		# read log file
@@ -141,6 +153,82 @@ class PCStat:
 		return ret
 
 
+	# submit PC and convert into PC code number.
+	def convert_pc_symbol_into_code(self, pc_symbols):
+		keys = self.pc_dict.keys()
+		code = -1
+		
+		for symbol_string in keys:
+			symbols = symbol_string.split('\t')
+			length = min(len(symbols), len(pc_symbols))
+			common_pc_length = 0
+			
+			# get common PC sequence
+			for i in range(length):
+				if i < len(pc_symbols):
+					if pc_symbols[i] == symbols[i]:
+						common_pc_length += 1
+					else:
+						# provide 1 more readahead in case of noise PCs.
+						if i < len(pc_symbols) - 1 and pc_symbols[i + 1] == symbols[i]:
+							pc_symbols.pop(i)
+							common_pc_length += 1
+						else:
+							break
+
+			# set this as the common PC if common length is longer than wrapup degree.
+			if common_pc_length > IO_WRAP_DEGREE:
+				code = self.pc_dict[symbol_string]
+
+				# get new common PC sequence
+				pc_seq = symbols[0:common_pc_length]
+
+				# remove previous pc sequence
+				self.pc_dict.pop(symbol_string, None)
+				
+				# set new PC sequence
+				self.pc_dict[pcs_into_string(pc_seq)] = code
+				break
+
+		# add new PC to pc_dict if there is no common sequence.
+		if code == -1 and len(pc_symbols) > IO_WRAP_DEGREE:
+			code = self.pc_counter
+			self.pc_counter += 1
+			self.pc_dict[pcs_into_string(pc_symbols)] = code
+
+		return code
+
+
+	# write PC table and log to file.
+	def syscall_log(self):
+		# write PC table to file
+		pc_table_file = open("logs/syscall_table.log", "w")
+		sorted_tuples = sorted(self.pc_dict.items(), key=lambda x:x[1])
+		
+		for pc_string, pc_code in sorted_tuples:
+			pcs = pc_string.split("\t")
+
+			string = str(pc_code)
+			for pc in pcs:
+				string += "\t" + pc + "\n"
+			string += "\n"
+			
+			pc_table_file.write(string)
+
+		pc_table_file.close()
+
+		# write each PC's I/O syscall
+		for pc_code in self.syscalls_per_pc.keys():
+			f = open("logs/pc_" + str(pc_code) + ".log", "w")
+			
+			syscalls = self.syscalls_per_pc[pc_code]
+			for syscall in syscalls:
+				syscall.print_syscall(f, None)
+
+			f.close()
+	
+
+
 type_dictionary = {0:"READ", 1:"PREAD64", 2:"READV", 3:"PREADV", 4:"WRITE", 5:"PWRITE64", 6:"WRITEV", 7:"PWRITEV"}
 
 
@@ -170,26 +258,18 @@ class Syscall:
 	# prints the system call information to file.
 	def print_syscall(self, f, f_pc):
 		string = str(self.timestamp)
-		string += "\t" + str(self.latency)
-		string += "\t" + self.filename
+		#string += "\t" + str(self.latency)
 		string += "\t" + type_dictionary[self.type]
 		string += "\t" + str(self.pos)
-		string += "\t" + str(self.size) + "\n"
+		string += "\t" + str(self.size)
+		string += "\t" + self.filename + "\n"
 		f.write(string)
 
-		pc_string = ""
-		for pc in self.pcs:
-			pc_string += pc + "\n"
-		f_pc.write(pc_string + "\n")
-
-
-
-# temporary function for storing PC.
-def pcs_into_string(pcs):
-	ret = ''
-	for pc in pcs:
-		ret += pc + ' '
-	return ret
+		if f_pc is not None:
+			pc_string = ""
+			for pc in self.pcs:
+				pc_string += pc + "\n"
+			f_pc.write(pc_string + "\n")
 
 
 
@@ -205,21 +285,27 @@ def main():
 
 		syscall = Syscall(line.split("\t"), pcstat);
 
+		# block unnecessary /dev/pts related syscalls
+		if "/dev/pts" in syscall.filename:
+			continue
+
 		# add syscall information to pc_dict
-		syscall_list = list()
-		pcs_string = pcs_into_string(syscall.pcs)
-		if pcs_string in pcstat.pc_dict:
-			syscall_list = pcstat.pc_dict[pcs_string]
-		syscall_list.append(syscall)
-		pcstat.pc_dict[pcs_string] = syscall_list
+		code = pcstat.convert_pc_symbol_into_code(syscall.pcs)
+		if code >= 0:
+			syscall_list = list()
+			if code in pcstat.syscalls_per_pc:
+				syscall_list = pcstat.syscalls_per_pc[code]
+			syscall_list.append(syscall)
+			pcstat.syscalls_per_pc[code] = syscall_list
 
 		# write converted system call information to new file.
-		f = open("logs/log_" + syscall.filename.split("/")[-1], "a")
-		f_pc = open("logs/pc_" + syscall.filename.split("/")[-1], "a")
-		syscall.print_syscall(f, f_pc)
+		#f = open("logs/log_" + syscall.filename.split("/")[-1], "a")
+		#f_pc = open("logs/pc_" + syscall.filename.split("/")[-1], "a")
+		#syscall.print_syscall(f, f_pc)
 
 	pcstat.file_close()
 
 	# analyze given syscalls
+	pcstat.syscall_log()
 
 main()
