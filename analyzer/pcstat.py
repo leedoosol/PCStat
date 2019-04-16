@@ -15,6 +15,8 @@ import sys
 '''
 
 IO_WRAP_DEGREE = 3
+PAGE_SIZE = 4096
+SEQUENTIAL_THRESHOLD = 4
 
 # temporary function for storing PC.
 def pcs_into_string(pcs):
@@ -226,7 +228,86 @@ class PCStat:
 				syscall.print_syscall(f, None)
 
 			f.close()
-	
+
+
+	# analyze given PCs - find pattern.
+	def analyze_syscall(self):
+		for pc_code in self.syscalls_per_pc.keys():
+			# get syscalls per pc_code
+			syscalls = self.syscalls_per_pc[pc_code]
+
+			# hint for given sequence of system call
+			is_sequential_io = False
+			has_high_locality = False
+
+			locality_dict = dict()
+
+			# check locality
+			seq_depth = 0
+			seq_depth_list = list()
+			cur_sector = syscalls[0].pos
+			block_access_list = list()
+			cnt = 0
+
+			# traverse through every system call.
+			for syscall in syscalls:
+				cnt += 1
+				sector = syscall.pos
+				size = syscall.size
+
+				# add this block's access time.
+				block_access_list.append(sector - (sector % PAGE_SIZE))
+
+				# set sequentiality depth if matches.
+				if sector == cur_sector:
+					seq_depth += 1
+					if cnt == len(syscalls):
+						seq_depth_list.append(seq_depth)
+				else:
+					seq_depth_list.append(seq_depth)
+					seq_depth = 1
+				
+				cur_sector = sector + size
+
+			# set this PC to 'sequential' if average of seq_depth_list is larger than threshold.
+			if sum(seq_depth_list) / (float)(len(seq_depth_list)) >= SEQUENTIAL_THRESHOLD:
+				is_sequential_io = True
+
+			# calculate average reference recency.
+			recent_visited_blocks = list()
+			ref_recency = 0.0
+			avg_ref_recency = 0.0
+			undef = 0
+
+			# R_i : p_i / (|L_i| - 1)      if |L_i| > 1
+			#       0.5                    if |L_i| == 1
+			#       undef                  if first access
+			for sector in block_access_list:
+				# check this sequence as undefined.
+				if sector not in recent_visited_blocks:
+					undef += 1
+					recent_visited_blocks.append(sector)
+				# no need to remove element from list.
+				elif len(recent_visited_blocks) == 1:
+					ref_recency += 0.5
+				# calculate locality, remove, and append sector number.
+				else:
+					ref_recency += block_access_list.index(sector) / (float)(len(recent_visited_blocks) - 1)
+					recent_visited_blocks.remove(sector)
+					recent_visited_blocks.append(sector)
+
+			# avoid divide-by-zero-exception.
+			if undef == len(block_access_list):
+				avg_ref_recency = 0
+			else:
+				avg_ref_recency = ref_recency / (float)(len(block_access_list) - undef)
+
+			# set this PC to 'high locality' if average reference recency is equal or above 0.4.
+			if avg_ref_recency >= 0.4:
+				has_high_locality = True
+
+			# log
+			print "PC Code", pc_code, ": sequentiality", is_sequential_io, ", high locality", has_high_locality
 
 
 type_dictionary = {0:"READ", 1:"PREAD64", 2:"READV", 3:"PREADV", 4:"WRITE", 5:"PWRITE64", 6:"WRITEV", 7:"PWRITEV"}
@@ -307,5 +388,6 @@ def main():
 
 	# analyze given syscalls
 	pcstat.syscall_log()
+	pcstat.analyze_syscall()
 
 main()
