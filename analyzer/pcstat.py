@@ -14,6 +14,7 @@ import sys
 	sys.argv[4]: symbol table filename
 '''
 
+type_dictionary = {0:"READ", 1:"PREAD64", 2:"READV", 3:"PREADV", 4:"WRITE", 5:"PWRITE64", 6:"WRITEV", 7:"PWRITEV"}
 IO_WRAP_DEGREE = 3
 PAGE_SIZE = 4096
 SEQUENTIAL_THRESHOLD = 4
@@ -235,6 +236,7 @@ class PCStat:
 		for pc_code in self.syscalls_per_pc.keys():
 			# get syscalls per pc_code
 			syscalls = self.syscalls_per_pc[pc_code]
+			print "PC code:", pc_code,
 
 			# hint for given sequence of system call
 			is_sequential_io = False
@@ -246,20 +248,27 @@ class PCStat:
 			seq_depth = 0
 			seq_depth_list = list()
 			cur_sector = syscalls[0].pos
+			filename = syscalls[0].filename
 			block_access_list = list()
 			cnt = 0
+			io_type = 0
+			total_io_size = 0
 
 			# traverse through every system call.
 			for syscall in syscalls:
 				cnt += 1
 				sector = syscall.pos
 				size = syscall.size
+				io_type = syscall.type
+
+				total_io_size += size
 
 				# add this block's access time.
-				block_access_list.append(sector - (sector % PAGE_SIZE))
+				block_access_list.append((syscall.filename, sector - (sector % PAGE_SIZE)))
 
 				# set sequentiality depth if matches.
-				if sector == cur_sector:
+				# sequentiality doesnt matter when I/O size is too small, so ignore small I/Os.
+				if filename == syscall.filename and sector == cur_sector and size >= PAGE_SIZE:
 					seq_depth += 1
 					if cnt == len(syscalls):
 						seq_depth_list.append(seq_depth)
@@ -268,10 +277,15 @@ class PCStat:
 					seq_depth = 1
 				
 				cur_sector = sector + size
+				filename = syscall.filename
+
+			print ", I/O type:", type_dictionary[io_type], ", Average I/O size: %.2f" % (total_io_size / (float)(len(syscalls))),
 
 			# set this PC to 'sequential' if average of seq_depth_list is larger than threshold.
-			if sum(seq_depth_list) / (float)(len(seq_depth_list)) >= SEQUENTIAL_THRESHOLD:
+			avg_seq_depth = sum(seq_depth_list) / (float)(len(seq_depth_list))
+			if avg_seq_depth >= SEQUENTIAL_THRESHOLD:
 				is_sequential_io = True
+			print ", Average seq depth: %.5f" % (avg_seq_depth),
 
 			# calculate average reference recency.
 			recent_visited_blocks = list()
@@ -297,20 +311,15 @@ class PCStat:
 					recent_visited_blocks.append(sector)
 
 			# avoid divide-by-zero-exception.
-			if undef == len(block_access_list):
-				avg_ref_recency = 0
-			else:
-				avg_ref_recency = ref_recency / (float)(len(block_access_list) - undef)
+			#if undef == len(block_access_list):
+			#	avg_ref_recency = 0
+			#else:
+			avg_ref_recency = ref_recency / (float)(len(block_access_list))
 
 			# set this PC to 'high locality' if average reference recency is equal or above 0.4.
 			if avg_ref_recency >= 0.4:
 				has_high_locality = True
-
-			# log
-			print "PC Code", pc_code, ": sequentiality", is_sequential_io, ", high locality", has_high_locality
-
-
-type_dictionary = {0:"READ", 1:"PREAD64", 2:"READV", 3:"PREADV", 4:"WRITE", 5:"PWRITE64", 6:"WRITEV", 7:"PWRITEV"}
+			print ", Average reference recency: %.5f" % (avg_ref_recency)
 
 
 
