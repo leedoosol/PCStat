@@ -94,6 +94,10 @@ class PCStat:
 				for i in range(6, len(symbol)):
 					symbol_name += " " + symbol[i]
 				self.symbol_table[int(symbol[0], 16)] = symbol_name
+
+		keys = self.symbol_table.keys()
+		keys.sort()
+		self.sorted_keys = keys
 	
 
 	# read PC syscall log from file
@@ -122,8 +126,7 @@ class PCStat:
 	# get the symbols from given pcs.
 	def convert_pc_to_symbol(self, pcs):
 		ret = list()
-		keys = self.symbol_table.keys()
-		keys.sort()
+		keys = self.sorted_keys
 
 		# convert every pc in pcs.
 		for pc_offset in pcs:
@@ -377,6 +380,12 @@ def main():
 
 		# block unnecessary /dev/pts related syscalls
 		if "/dev/pts" in syscall.filename:
+			continue
+		if "/sys/devices" in syscall.filename:
+			continue
+		if "/proc/" in syscall.filename:
+			continue
+		if "/usr/share/" in syscall.filename:
 			continue
 
 		# add syscall information to pc_dict
