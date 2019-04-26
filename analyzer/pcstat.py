@@ -144,7 +144,7 @@ class PCStat:
 					func_name = self.symbol_table[keys[idx]] + (" + 0x%x" % (pc - keys[idx]))
 					break
 				elif keys[idx + 1] == pc:
-					print "FUNCTION POINTER DETECTED for PC 0x%x" % (pc)
+					#print "FUNCTION POINTER DETECTED for PC 0x%x" % (pc)
 					func_name = "*FNCPTR_DETECTED*"
 					break
 
@@ -370,6 +370,7 @@ class Syscall:
 def main():
 	pcstat = PCStat()
 	logs = dict()
+	num_syscall = 0
 
 	while True:
 		line = pcstat.readline()
@@ -401,6 +402,10 @@ def main():
 		#f = open("logs/log_" + syscall.filename.split("/")[-1], "a")
 		#f_pc = open("logs/pc_" + syscall.filename.split("/")[-1], "a")
 		#syscall.print_syscall(f, f_pc)
+
+		num_syscall += 1
+		if num_syscall % 10000 == 0:
+			print num_syscall, "syscalls has been calculated"
 
 	pcstat.file_close()
 
