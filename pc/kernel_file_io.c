@@ -3,6 +3,7 @@
 #include <linux/fs.h>
 #include <linux/sched.h>
 #include <linux/file.h>
+#include <linux/version.h>
 
 #include <asm/processor.h>
 #include <asm/uaccess.h>
@@ -72,11 +73,13 @@ int file_read(char* buf, int len, struct file *filp)
 		return -ENOENT;
 	}
 
+#if LINUX_VERSION_CODE <= KERNEL_VERSION(4,0,0)
 	/* patch for linux 4.x: filp->f_op->read is disabled. use __vfs_read instead. */
-	//if(filp->f_op->read == NULL)
-	//{
-	//	return -ENOSYS;
-	//}
+	if(filp->f_op->read == NULL)
+	{
+		return -ENOSYS;
+	}
+#endif
 
 	if(((filp->f_flags & O_ACCMODE) & O_RDONLY) != 0)
 	{
@@ -85,8 +88,11 @@ int file_read(char* buf, int len, struct file *filp)
 
 	oldfs = get_fs();
 	set_fs(KERNEL_DS);
-	//read_len = filp->f_op->read(filp, buf, len, &filp->f_pos);
+#if LINUX_VERSION_CODE <= KERNEL_VERSION(4,0,0)
+	read_len = filp->f_op->read(filp, buf, len, &filp->f_pos);
+#else
 	read_len = __vfs_read(filp, buf, len, &filp->f_pos);
+#endif
 	set_fs(oldfs);
 
 	return read_len;
@@ -102,11 +108,13 @@ int file_write(char* buf, int len, struct file *filp)
 		return -ENOENT;
 	}
 
+#if LINUX_VERSION_CODE <= KERNEL_VERSION(4,0,0)
 	/* patch for linux 4.x: filp->f_op->write is disabled. use __vfs_write instead. */
-	//if(filp->f_op->write == NULL)
-	//{
-	//	return -ENOSYS;
-	//}
+	if(filp->f_op->write == NULL)
+	{
+		return -ENOSYS;
+	}
+#endif
 
 	if(((filp->f_flags & O_ACCMODE) & (O_WRONLY | O_RDWR)) == 0)
 	{
@@ -115,8 +123,11 @@ int file_write(char* buf, int len, struct file *filp)
 
 	oldfs = get_fs();
 	set_fs(KERNEL_DS);
-	//write_len = filp->f_op->write(filp, buf, len, &filp->f_pos);
+#if LINUX_VERSION_CODE <= KERNEL_VERSION(4,0,0)
+	write_len = filp->f_op->write(filp, buf, len, &filp->f_pos);
+#else
 	write_len = __vfs_write(filp, buf, len, &filp->f_pos);
+#endif
 	set_fs(oldfs);
 
 	return write_len;

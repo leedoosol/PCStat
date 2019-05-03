@@ -38,6 +38,7 @@ class PCStat:
 		self.pc_counter = 0;
 		self.syscalls_per_pc = dict()
 		self.binary_name = sys.argv[1]
+		self.file_dict = dict()
 
 		# read log file
 		self.log_file = open(sys.argv[1], "r")
@@ -234,18 +235,51 @@ class PCStat:
 			f.close()
 
 
+	# get block access times from pcstat
+	def get_block_access_times(self, filename, pos):
+		block_access_times = list()
+
+		if filename in self.file_dict.keys():
+			blocks = self.file_dict[filename]
+			if pos in blocks:
+				block_access_times = blocks[pos]
+
+		return block_access_times
+	
+
+	# set block access time to pcstat
+	def set_block_access_times(self, filename, pos, block_access_times):
+		if filename not in self.file_dict.keys():
+			self.file_dict[filename] = new dict()
+
+		blocks = self.file_dict[filename]
+		blocks[pos] = block_access_times
+		self.file_dict[filename] = blocks
+
+
+	def calculate_block_reref_time(self):
+		for filename in self.file_dict.keys():
+			blocks = self.file_dict[filename]
+			for sector_no in blocks.keys():
+				block_ref_times = blocks[sector_no]
+				block_ref_times.sort()
+				sum_reref_times = 0
+				reref_no = 0
+				for i in range(len(block_ref_times) - 1):
+					reref_time = block_ref_times[i + 1] - block_ref_times[i]
+					if reref_time < 100000000:
+						sum_reref_times += reref_time
+						reref_no += 1
+
+				blocks[sector_no] = reref_no == 0 ? -100000000 : (float)sum_reref_times / (float)reref_no
+
+
 	# analyze given PCs - find pattern.
 	def analyze_syscall(self):
 		for pc_code in self.syscalls_per_pc.keys():
 			# get syscalls per pc_code
 			syscalls = self.syscalls_per_pc[pc_code]
 			print "PC code:", pc_code,
-
-			# hint for given sequence of system call
-			is_sequential_io = False
-			has_high_locality = False
-
-			locality_dict = dict()
 
 			# check locality
 			seq_depth = 0
@@ -266,9 +300,6 @@ class PCStat:
 
 				total_io_size += size
 
-				# add this block's access time.
-				block_access_list.append((syscall.filename, sector - (sector % PAGE_SIZE)))
-
 				# set sequentiality depth if matches.
 				# sequentiality doesnt matter when I/O size is too small, so ignore small I/Os.
 				if filename == syscall.filename and sector == cur_sector and size >= PAGE_SIZE:
@@ -286,44 +317,20 @@ class PCStat:
 
 			# set this PC to 'sequential' if average of seq_depth_list is larger than threshold.
 			avg_seq_depth = sum(seq_depth_list) / (float)(len(seq_depth_list))
-			if avg_seq_depth >= SEQUENTIAL_THRESHOLD:
-				is_sequential_io = True
 			print ", Average seq depth: %.5f" % (avg_seq_depth),
 
-			# calculate average reference recency.
-			recent_visited_blocks = list()
-			ref_recency = 0.0
-			avg_ref_recency = 0.0
-			undef = 0
+			# get block's access frequency
+			avg_ref_recency = -100000000
+			if syscall.filename in self.file_dict.keys():
+				blocks = self.file_dict[syscall.filename]
+				if syscall.size <= PAGE_SIZE * 16:
+					for i in range(0, syscall.size / PAGE_SIZE):
+						sector = (syscall.pos % PAGE_SIZE) + (i * PAGE_SIZE)
+						if sector in blocks:
+							if avg_ref_recency < blocks[sector]:
+								avg_ref_recency = blocks[sector]
 
-			# R_i : p_i / (|L_i| - 1)      if |L_i| > 1
-			#       0.5                    if |L_i| == 1
-			#       undef                  if first access
-			for sector in block_access_list:
-				# check this sequence as undefined.
-				if sector not in recent_visited_blocks:
-					undef += 1
-					recent_visited_blocks.append(sector)
-				# no need to remove element from list.
-				elif len(recent_visited_blocks) == 1:
-					ref_recency += 0.5
-				# calculate locality, remove, and append sector number.
-				else:
-					ref_recency += block_access_list.index(sector) / (float)(len(recent_visited_blocks) - 1)
-					recent_visited_blocks.remove(sector)
-					recent_visited_blocks.append(sector)
-
-			# avoid divide-by-zero-exception.
-			#if undef == len(block_access_list):
-			#	avg_ref_recency = 0
-			#else:
-			avg_ref_recency = ref_recency / (float)(len(block_access_list))
-
-			# set this PC to 'high locality' if average reference recency is equal or above 0.4.
-			if avg_ref_recency >= 0.4:
-				has_high_locality = True
-			print ", Average reference recency: %.5f" % (avg_ref_recency)
-
+			print ", Average reference recency: %.5f secs" % (avg_ref_recency / 100000000.0)
 
 
 # represents each system call.
@@ -398,6 +405,14 @@ def main():
 			syscall_list.append(syscall)
 			pcstat.syscalls_per_pc[code] = syscall_list
 
+			# add data access time to file_dict
+			if syscall.size <= PAGE_SIZE * 16:
+				for i in range(0, syscall.size / PAGE_SIZE):
+					pos = (syscall.pos % PAGE_SIZE) + (PAGE_SIZE * i)
+					block_access_times = pcstat.get_block_access_times(syscall.filename, pos)
+					block_access_times.append(syscall.timestamp)
+					pcstat.set_block_access_times(syscall.filename, pos, block_access_times)
+
 		# write converted system call information to new file.
 		#f = open("logs/log_" + syscall.filename.split("/")[-1], "a")
 		#f_pc = open("logs/pc_" + syscall.filename.split("/")[-1], "a")
@@ -408,6 +423,9 @@ def main():
 			print num_syscall, "syscalls has been calculated"
 
 	pcstat.file_close()
+
+	# calculate each block's average re-reference time
+	pcstat.calculate_block_reref_time();
 
 	# analyze given syscalls
 	pcstat.syscall_log()
