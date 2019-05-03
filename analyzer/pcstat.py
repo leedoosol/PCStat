@@ -250,7 +250,7 @@ class PCStat:
 	# set block access time to pcstat
 	def set_block_access_times(self, filename, pos, block_access_times):
 		if filename not in self.file_dict.keys():
-			self.file_dict[filename] = new dict()
+			self.file_dict[filename] = dict()
 
 		blocks = self.file_dict[filename]
 		blocks[pos] = block_access_times
