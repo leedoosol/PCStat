@@ -271,7 +271,10 @@ class PCStat:
 						sum_reref_times += reref_time
 						reref_no += 1
 
-				blocks[sector_no] = reref_no == 0 ? -100000000 : (float)sum_reref_times / (float)reref_no
+				if reref_no == 0:
+					blocks[sector_no] = -100000000
+				else:
+					blocks[sector_no] = float(sum_reref_times) / float(reref_no)
 
 
 	# analyze given PCs - find pattern.

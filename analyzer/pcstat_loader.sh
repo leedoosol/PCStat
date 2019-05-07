@@ -2,7 +2,7 @@
 
 # arg1: I/O log file name, arg2: binary file name(to disassemble), arg3: pc syscall log file name
 
-cd ~/pcstat/analyzer
+#cd ~/pcstat/analyzer
 
 # 1. get base address of ELF binary
 readelf -l $2 | grep LOAD | head -1 > base_address.tmp
