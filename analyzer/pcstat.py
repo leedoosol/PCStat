@@ -15,7 +15,7 @@ import sys
 '''
 
 type_dictionary = {0:"READ", 1:"PREAD64", 2:"READV", 3:"PREADV", 4:"WRITE", 5:"PWRITE64", 6:"WRITEV", 7:"PWRITEV"}
-IO_WRAP_DEGREE = 3
+IO_WRAP_DEGREE = 1
 PAGE_SIZE = 4096
 SEQUENTIAL_THRESHOLD = 4
 
@@ -142,18 +142,17 @@ class PCStat:
 
 			for idx in range(len(keys) - 1):
 				if keys[idx + 1] > pc:
-					func_name = self.symbol_table[keys[idx]] + (" + 0x%x" % (pc - keys[idx]))
+					func_name = self.symbol_table[keys[idx]]# + (" + 0x%x" % (pc - keys[idx]))
 					break
 				elif keys[idx + 1] == pc:
 					#print "FUNCTION POINTER DETECTED for PC 0x%x" % (pc)
 					func_name = "*FNCPTR_DETECTED*"
 					break
-
+					
 			if func_name == '':
 				if self.code_finish_address > pc:
-					ret.append(self.symbol_table[keys[len(keys) - 1]] + (" + 0x%x" % (pc - keys[len(keys) - 1])))
-				#else:
-					#print "NO FUNCTION DETECTED for PC 0x%x" % (pc)
+					ret.append(self.symbol_table[keys[len(keys) - 1]])
+#ret.append(self.symbol_table[keys[len(keys) - 1]] + (" + 0x%x" % (pc - keys[len(keys) - 1])))
 			elif func_name != "*FNCPTR_DETECTED*":
 				ret.append(func_name)
 
@@ -168,33 +167,40 @@ class PCStat:
 		for symbol_string in keys:
 			symbols = symbol_string.split('\t')
 			length = min(len(symbols), len(pc_symbols))
-			common_pc_length = 0
 			
 			# get common PC sequence
+			ahead = 0
+			common_symbols = []
 			for i in range(length):
-				if i < len(pc_symbols):
-					if pc_symbols[i] == symbols[i]:
-						common_pc_length += 1
+				if i < len(pc_symbols) and i + ahead < len(symbols):
+					if pc_symbols[i] == symbols[i + ahead]:
+						common_symbols.append(pc_symbols[i])
 					else:
 						# provide 1 more readahead in case of noise PCs.
-						if i < len(pc_symbols) - 1 and pc_symbols[i + 1] == symbols[i]:
-							pc_symbols.pop(i)
-							common_pc_length += 1
+						if i < len(pc_symbols) - 1:
+							if pc_symbols[i + 1] == symbols[i + ahead]:
+								common_symbols.append(pc_symbols[i + 1])
+								pc_symbols.pop(i)
+							elif i + ahead < len(symbols) - 1 and pc_symbols[i] == symbols[i + ahead + 1]:
+								common_symbols.append(pc_symbols[i])
+								ahead += 1
+							elif i + ahead < len(symbols) - 1 and pc_symbols[i + 1] == symbols[i + ahead + 1]:
+								common_symbols.append(pc_symbols[i + 1])
+								pc_symbols.pop(i)
+								ahead += 1
 						else:
 							break
 
-			# set this as the common PC if common length is longer than wrapup degree.
-			if common_pc_length > IO_WRAP_DEGREE:
-				code = self.pc_dict[symbol_string]
 
-				# get new common PC sequence
-				pc_seq = symbols[0:common_pc_length]
+			# set this as the common PC if common length is longer than wrapup degree.
+			if len(common_symbols) > IO_WRAP_DEGREE:
+				code = self.pc_dict[symbol_string]
 
 				# remove previous pc sequence
 				self.pc_dict.pop(symbol_string, None)
 				
 				# set new PC sequence
-				self.pc_dict[pcs_into_string(pc_seq)] = code
+				self.pc_dict[pcs_into_string(common_symbols)] = code
 				break
 
 		# add new PC to pc_dict if there is no common sequence.
@@ -279,10 +285,10 @@ class PCStat:
 
 	# analyze given PCs - find pattern.
 	def analyze_syscall(self):
+		pc_log_file = open("pc_log.log", "w")
 		for pc_code in self.syscalls_per_pc.keys():
 			# get syscalls per pc_code
 			syscalls = self.syscalls_per_pc[pc_code]
-			print "PC code:", pc_code,
 
 			# check locality
 			seq_depth = 0
@@ -293,6 +299,7 @@ class PCStat:
 			cnt = 0
 			io_type = 0
 			total_io_size = 0
+			total_latency = 0
 
 			# traverse through every system call.
 			for syscall in syscalls:
@@ -302,6 +309,7 @@ class PCStat:
 				io_type = syscall.type
 
 				total_io_size += size
+				total_latency += syscall.latency
 
 				# set sequentiality depth if matches.
 				# sequentiality doesnt matter when I/O size is too small, so ignore small I/Os.
@@ -316,11 +324,20 @@ class PCStat:
 				cur_sector = sector + size
 				filename = syscall.filename
 
-			print ", I/O type:", type_dictionary[io_type], ", Average I/O size: %.2f" % (total_io_size / (float)(len(syscalls))),
+			# ignore minor PCs.
+			if total_io_size < PAGE_SIZE * 16:
+				continue
 
+			pc_log_file.write("PC " + str(pc_code))
+			pc_log_file.write("\ttype " + type_dictionary[io_type] + ("\t\tavg I/O size %.2f\tavg latency %.2f" % (total_io_size / float(len(syscalls)), total_latency / float(len(syscalls)))))
+
+			pc_log_file.write("\t\tI/O Pattern: ")
 			# set this PC to 'sequential' if average of seq_depth_list is larger than threshold.
 			avg_seq_depth = sum(seq_depth_list) / (float)(len(seq_depth_list))
-			print ", Average seq depth: %.5f" % (avg_seq_depth),
+			if avg_seq_depth >= 4:
+				pc_log_file.write("SEQUENTIAL ")
+			elif avg_seq_depth <= 1:
+				pc_log_file.write("RANDOM ")
 
 			# get block's access frequency
 			avg_ref_recency = -100000000
@@ -333,7 +350,13 @@ class PCStat:
 							if avg_ref_recency < blocks[sector]:
 								avg_ref_recency = blocks[sector]
 
-			print ", Average reference recency: %.5f secs" % (avg_ref_recency / 100000000.0)
+			avg_ref_recency = avg_ref_recency / 100000000.0
+			if avg_ref_recency < 0:
+				pc_log_file.write("DONTNEED")
+			elif avg_ref_recency < 0.001:
+				pc_log_file.write("WILLNEED - ref in %.5f secs" % (avg_ref_recency))
+			pc_log_file.write("\n")
+		pc_log_file.close()
 
 
 # represents each system call.
@@ -387,6 +410,10 @@ def main():
 		if not line:
 			break
 
+		num_syscall += 1
+		if num_syscall % 10000 == 0:
+			print num_syscall, "syscalls has been calculated"
+
 		syscall = Syscall(line.split("\t"), pcstat);
 
 		# block unnecessary /dev/pts related syscalls
@@ -399,6 +426,10 @@ def main():
 		if "/usr/share/" in syscall.filename:
 			continue
 
+		# remove too small writes: small writes are logs
+		if syscall.size <= 256 and syscall.type >= 4:
+			continue
+
 		# add syscall information to pc_dict
 		code = pcstat.convert_pc_symbol_into_code(syscall.pcs)
 		if code >= 0:
@@ -409,7 +440,7 @@ def main():
 			pcstat.syscalls_per_pc[code] = syscall_list
 
 			# add data access time to file_dict
-			if syscall.size <= PAGE_SIZE * 16:
+			if syscall.size <= PAGE_SIZE * 16 and syscall.type <= 3:
 				for i in range(0, syscall.size / PAGE_SIZE):
 					pos = (syscall.pos % PAGE_SIZE) + (PAGE_SIZE * i)
 					block_access_times = pcstat.get_block_access_times(syscall.filename, pos)
@@ -420,10 +451,6 @@ def main():
 		#f = open("logs/log_" + syscall.filename.split("/")[-1], "a")
 		#f_pc = open("logs/pc_" + syscall.filename.split("/")[-1], "a")
 		#syscall.print_syscall(f, f_pc)
-
-		num_syscall += 1
-		if num_syscall % 10000 == 0:
-			print num_syscall, "syscalls has been calculated"
 
 	pcstat.file_close()
 

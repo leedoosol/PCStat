@@ -64,7 +64,7 @@ extern int set_record_syscall_pc (FuncType fn);
 #define TRUE 1
 #define FALSE 0
 #define ADDRESS_UNIT 8
-#define NUM_RET_ADDR_THRESHOLD 20
+#define NUM_RET_ADDR_THRESHOLD 5
 #define ValueOf(a) (*((unsigned long *) (a)))
 
 #define PRINT_SYSCALL
@@ -125,7 +125,7 @@ void record_pc_fn(unsigned int fd, struct file *filp, unsigned int count, unsign
 		//value = ValueOf(stk_cur);
 		if(!copy_from_user(&value, stk_cur, ADDRESS_UNIT)) {
 			/* check if the address stored in stack is inside the code segment */
-			if(mm->start_code <= value && value <= mm->end_code) {
+			if(mm->start_code < value && value < mm->end_code) {
 				/* store each PC to PC buffer */
 				sprintf(pc_buf + pc_buf_idx, "%p ", (void*)(value - mm->start_code));
 				pc_buf_idx = strlen(pc_buf);
