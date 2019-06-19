@@ -18,6 +18,7 @@ type_dictionary = {0:"READ", 1:"PREAD64", 2:"READV", 3:"PREADV", 4:"WRITE", 5:"P
 IO_WRAP_DEGREE = 1
 PAGE_SIZE = 4096
 SEQUENTIAL_THRESHOLD = 4
+PC_INTO_SIGNATURE = False
 
 # temporary function for storing PC.
 def pcs_into_string(pcs):
@@ -46,11 +47,12 @@ class PCStat:
 		# get the base address of binary
 		self.base_address = self.get_base_address()
 		print "BASE ADDRESS: %x" % self.base_address
+		self.code_finish_address = 0
 
 		# get the symbol table from binary ELF
-		self.symbol_table = dict()
-		self.code_finish_address = 0
-		self.setup_symbol_table()
+		if PC_INTO_SIGNATURE == False:
+			self.symbol_table = dict()
+			self.setup_symbol_table()
 
 		# get PC syscall log from file
 		self.pc_syscall_table = dict()
@@ -369,16 +371,22 @@ class Syscall:
 		self.type = int(args[3])
 		self.pos = int(args[4])
 		self.size = int(args[5])
+		self.code = 0
 
 		pcs = args[6].split()
 		pc_string = ''
+		
+		# id 'PC_SIG' : this requires the PC from user-level PC system call.
 		if pcs[0] == 'PC_SIG':
 			pc_splited = pcstat.pc_syscall_table[pcs[1]]
 		else:
 			pc_splited = pcs
 
 		pcs = map(lambda x: int(x, 16), pc_splited)
-		self.pcs = pcstat.convert_pc_to_symbol(pcs)
+		if PC_INTO_SIGNATURE:
+			self.code = sum(pcs)
+		else:
+			self.pcs = pcstat.convert_pc_to_symbol(pcs)
 
 	
 	# prints the system call information to file.
@@ -426,12 +434,11 @@ def main():
 		if "/usr/share/" in syscall.filename:
 			continue
 
-		# remove too small writes: small writes are logs
-		if syscall.size <= 256 and syscall.type >= 4:
-			continue
-
 		# add syscall information to pc_dict
-		code = pcstat.convert_pc_symbol_into_code(syscall.pcs)
+		if PC_INTO_SIGNATURE:
+			code = syscall.code
+		else:
+			code = pcstat.convert_pc_symbol_into_code(syscall.pcs)
 		if code >= 0:
 			syscall_list = list()
 			if code in pcstat.syscalls_per_pc:
@@ -458,7 +465,8 @@ def main():
 	pcstat.calculate_block_reref_time();
 
 	# analyze given syscalls
-	pcstat.syscall_log()
+	if PC_INTO_SIGNATURE == False:
+		pcstat.syscall_log()
 	pcstat.analyze_syscall()
 
 main()
