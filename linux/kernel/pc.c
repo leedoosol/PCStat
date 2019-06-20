@@ -91,21 +91,21 @@ static int file_write(char* buf, int len, struct file *filp)
 }
 
 typedef unsigned long (*PCFunc)(void);
-PCFunc record_pc = NULL;
-int set_record_pc (PCFunc fn)
+PCFunc sys_record_pc = NULL;
+int set_pc_syscall (PCFunc fn)
 {
-	record_pc = fn;
+	sys_record_pc = fn;
 	return 0;
 }
-EXPORT_SYMBOL(set_record_pc);
+EXPORT_SYMBOL(set_pc_syscall);
 
 /**
  * sys_get_pc: syscall for collecting current PCs
  */
 asmlinkage unsigned long sys_get_pc()
 {
-	if (record_pc != NULL)
-		return record_pc();
+	if (sys_record_pc != NULL)
+		return sys_record_pc();
 
 	return 0;
 }
@@ -122,23 +122,23 @@ asmlinkage unsigned long sys_get_pc()
 #define IO_PWRITEV	7
 
 typedef void (*PCFuncType)(unsigned int, struct file*, unsigned int, unsigned int, unsigned long, loff_t, ktime_t, ktime_t, long);
-PCFuncType record_syscall = NULL;
+PCFuncType log_io_with_pcsig = NULL;
 
-int set_record_syscall (PCFuncType fn)
+int set_log_io_with_pcsig (PCFuncType fn)
 {
-	record_syscall = fn;
+	log_io_with_pcsig = fn;
 	return 0;
 }
-EXPORT_SYMBOL(set_record_syscall);
+EXPORT_SYMBOL(set_log_io_with_pcsig);
 
-static int record_request_without_pc(unsigned int fd, struct file *file, unsigned int count,
+static int log_syscall_with_pcsig(unsigned int fd, struct file *file, unsigned int count,
 			 unsigned int type, unsigned long oldrsp, loff_t pos, ktime_t start, ktime_t end, long pc_sig)
 {
 	if (fd >= 2)
 	{
-		if (record_syscall != NULL)
+		if (log_io_with_pcsig != NULL)
 		{
-			record_syscall(fd, file, count, type, oldrsp, pos, start, end, pc_sig);
+			log_io_with_pcsig(fd, file, count, type, oldrsp, pos, start, end, pc_sig);
 		}
 	}
 
@@ -171,7 +171,7 @@ SYSCALL_DEFINE4(read_pc, unsigned int, fd, char __user *, buf, size_t, count, lo
 
 		end = ktime_get();
 		oldrsp = current_pt_regs()->sp;
-		record_request_without_pc(fd, f.file, count, IO_READ, oldrsp, prev_pos, start, end, pc_sig);
+		log_syscall_with_pcsig(fd, f.file, count, IO_READ, oldrsp, prev_pos, start, end, pc_sig);
 	}
 	return ret;
 }
@@ -196,7 +196,7 @@ SYSCALL_DEFINE4(write_pc, unsigned int, fd, const char __user *, buf, size_t, co
 
 		end = ktime_get();
 		oldrsp = current_pt_regs()->sp;
-		record_request_without_pc(fd, f.file, count, IO_WRITE, oldrsp, prev_pos, start, end, pc_sig);
+		log_syscall_with_pcsig(fd, f.file, count, IO_WRITE, oldrsp, prev_pos, start, end, pc_sig);
 	}
 
 	return ret;
@@ -224,7 +224,7 @@ SYSCALL_DEFINE5(pread64_pc, unsigned int, fd, char __user *, buf, size_t, count,
 
 		end = ktime_get();
 		oldrsp = current_pt_regs()->sp;
-		record_request_without_pc(fd, f.file, count, IO_PREAD64, oldrsp, prev_pos, start, end, pc_sig);
+		log_syscall_with_pcsig(fd, f.file, count, IO_PREAD64, oldrsp, prev_pos, start, end, pc_sig);
 	}
 
 	return ret;
@@ -252,7 +252,7 @@ SYSCALL_DEFINE5(pwrite64_pc, unsigned int, fd, const char __user *, buf, size_t,
 
 		end = ktime_get();
 		oldrsp = current_pt_regs()->sp;
-		record_request_without_pc(fd, f.file, count, IO_PWRITE64, oldrsp, prev_pos, start, end, pc_sig);
+		log_syscall_with_pcsig(fd, f.file, count, IO_PWRITE64, oldrsp, prev_pos, start, end, pc_sig);
 	}
 
 	return ret;
@@ -277,7 +277,7 @@ SYSCALL_DEFINE4(readv_pc, unsigned long, fd, const struct iovec __user *, vec, u
 
 		end = ktime_get();
 		oldrsp = current_pt_regs()->sp;
-		record_request_without_pc(fd, f.file, vlen, IO_READV, oldrsp, prev_pos, start, end, pc_sig);
+		log_syscall_with_pcsig(fd, f.file, vlen, IO_READV, oldrsp, prev_pos, start, end, pc_sig);
 	}
 
 	if (ret > 0)
@@ -305,7 +305,7 @@ SYSCALL_DEFINE4(writev_pc, unsigned long, fd, const struct iovec __user *, vec, 
 
 		end = ktime_get();
 		oldrsp = current_pt_regs()->sp;
-		record_request_without_pc(fd, f.file, vlen, IO_WRITEV, oldrsp, prev_pos, start, end, pc_sig);
+		log_syscall_with_pcsig(fd, f.file, vlen, IO_WRITEV, oldrsp, prev_pos, start, end, pc_sig);
 	}
 
 	if (ret > 0)
@@ -345,7 +345,7 @@ SYSCALL_DEFINE6(preadv_pc, unsigned long, fd, const struct iovec __user *, vec,
 
 		end = ktime_get();
 		oldrsp = current_pt_regs()->sp;
-		record_request_without_pc(fd, f.file, vlen, IO_PREADV, oldrsp, prev_pos, start, end, pc_sig);
+		log_syscall_with_pcsig(fd, f.file, vlen, IO_PREADV, oldrsp, prev_pos, start, end, pc_sig);
 	}
 
 	if (ret > 0)
@@ -378,7 +378,7 @@ SYSCALL_DEFINE6(pwritev_pc, unsigned long, fd, const struct iovec __user *, vec,
 
 		end = ktime_get();
 		oldrsp = current_pt_regs()->sp;
-		record_request_without_pc(fd, f.file, vlen, IO_PWRITEV, oldrsp, prev_pos, start, end, pc_sig);
+		log_syscall_with_pcsig(fd, f.file, vlen, IO_PWRITEV, oldrsp, prev_pos, start, end, pc_sig);
 	}
 
 	if (ret > 0)

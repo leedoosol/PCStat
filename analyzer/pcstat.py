@@ -12,21 +12,27 @@ import sys
 	sys.argv[2]: PC syscall log file name
 	sys.argv[3]: base address filename
 	sys.argv[4]: symbol table filename
+
+	Explanation for Terminology '(User-level) PC Syscall':
+		'PC syscall' records the PC of given point by user(programmer).
+		It exists for the detection of the real PC:
+			ex) I/O thread environment
 '''
 
 type_dictionary = {0:"READ", 1:"PREAD64", 2:"READV", 3:"PREADV", 4:"WRITE", 5:"PWRITE64", 6:"WRITEV", 7:"PWRITEV"}
 IO_WRAP_DEGREE = 1
 PAGE_SIZE = 4096
 SEQUENTIAL_THRESHOLD = 4
-PC_INTO_SIGNATURE = False
+PC_INTO_SIGNATURE = True
+MAKE_CONFIGURATION = True
+MAJOR_PC_IO_SIZE = PAGE_SIZE * 16
 
 # temporary function for storing PC.
-def pcs_into_string(pcs):
+def symbols_into_string(pcs):
 	ret = ''
 	for pc in pcs:
 		ret += pc + '\t'
 	return ret
-
 
 
 # represents the PCStat itself.
@@ -54,7 +60,7 @@ class PCStat:
 			self.symbol_table = dict()
 			self.setup_symbol_table()
 
-		# get PC syscall log from file
+		# get User-level PC syscall log from file
 		self.pc_syscall_table = dict()
 		self.setup_pc_syscall_table()
 
@@ -153,8 +159,7 @@ class PCStat:
 					
 			if func_name == '':
 				if self.code_finish_address > pc:
-					ret.append(self.symbol_table[keys[len(keys) - 1]])
-#ret.append(self.symbol_table[keys[len(keys) - 1]] + (" + 0x%x" % (pc - keys[len(keys) - 1])))
+					ret.append(self.symbol_table[keys[len(keys) - 1]]) # + (" + 0x%x" % (pc - keys[len(keys) - 1])))
 			elif func_name != "*FNCPTR_DETECTED*":
 				ret.append(func_name)
 
@@ -177,7 +182,7 @@ class PCStat:
 				if i < len(pc_symbols) and i + ahead < len(symbols):
 					if pc_symbols[i] == symbols[i + ahead]:
 						common_symbols.append(pc_symbols[i])
-					else:
+					elif PC_INTO_SIGNATURE == False:
 						# provide 1 more readahead in case of noise PCs.
 						if i < len(pc_symbols) - 1:
 							if pc_symbols[i + 1] == symbols[i + ahead]:
@@ -202,14 +207,14 @@ class PCStat:
 				self.pc_dict.pop(symbol_string, None)
 				
 				# set new PC sequence
-				self.pc_dict[pcs_into_string(common_symbols)] = code
+				self.pc_dict[symbols_into_string(common_symbols)] = code
 				break
 
 		# add new PC to pc_dict if there is no common sequence.
 		if code == -1 and len(pc_symbols) > IO_WRAP_DEGREE:
 			code = self.pc_counter
 			self.pc_counter += 1
-			self.pc_dict[pcs_into_string(pc_symbols)] = code
+			self.pc_dict[symbols_into_string(pc_symbols)] = code
 
 		return code
 
@@ -327,37 +332,55 @@ class PCStat:
 				filename = syscall.filename
 
 			# ignore minor PCs.
-			if total_io_size < PAGE_SIZE * 16:
+			if total_io_size < MAJOR_PC_IO_SIZE:
 				continue
 
-			pc_log_file.write("PC " + str(pc_code))
-			pc_log_file.write("\ttype " + type_dictionary[io_type] + ("\t\tavg I/O size %.2f\tavg latency %.2f" % (total_io_size / float(len(syscalls)), total_latency / float(len(syscalls)))))
+			avg_io_size = total_io_size / float(len(syscalls))
+			has_io_pattern = False
 
-			pc_log_file.write("\t\tI/O Pattern: ")
+			# create PC information and write to file.
+			pc_info = ""
+			if MAKE_CONFIGURATION:
+				pc_info = str(pc_code) + " "
+			else:
+				pc_info = "PC " + str(pc_code)
+				pc_info += "\t\ttype " + type_dictionary[io_type]
+				pc_info += "\t\tavg I/O size %.2f\tavg latency %.2f" % (avg_io_size, total_latency / float(len(syscalls)))
+				pc_info += "\t\tI/O Pattern: "
+
 			# set this PC to 'sequential' if average of seq_depth_list is larger than threshold.
 			avg_seq_depth = sum(seq_depth_list) / (float)(len(seq_depth_list))
 			if avg_seq_depth >= 4:
-				pc_log_file.write("SEQUENTIAL ")
-			elif avg_seq_depth <= 1:
-				pc_log_file.write("RANDOM ")
+				pc_info += "SEQUENTIAL "
+				has_io_pattern = True
+			elif avg_seq_depth <= 1 and avg_io_size <= PAGE_SIZE * 4:
+				# random only has meaning when I/O is small enough.
+				pc_info += "RANDOM "
+				has_io_pattern = True
 
 			# get block's access frequency
 			avg_ref_recency = -100000000
 			if syscall.filename in self.file_dict.keys():
 				blocks = self.file_dict[syscall.filename]
-				if syscall.size <= PAGE_SIZE * 16:
-					for i in range(0, syscall.size / PAGE_SIZE):
-						sector = (syscall.pos % PAGE_SIZE) + (i * PAGE_SIZE)
-						if sector in blocks:
-							if avg_ref_recency < blocks[sector]:
-								avg_ref_recency = blocks[sector]
+				for i in range(0, syscall.size / PAGE_SIZE):
+					sector = (syscall.pos % PAGE_SIZE) + (i * PAGE_SIZE)
+					if sector in blocks:
+						if avg_ref_recency < blocks[sector]:
+							avg_ref_recency = blocks[sector]
 
 			avg_ref_recency = avg_ref_recency / 100000000.0
 			if avg_ref_recency < 0:
-				pc_log_file.write("DONTNEED")
+				pc_info += "DONTNEED"
+				has_io_pattern = True
 			elif avg_ref_recency < 0.001:
-				pc_log_file.write("WILLNEED - ref in %.5f secs" % (avg_ref_recency))
-			pc_log_file.write("\n")
+				pc_info += "WILLNEED"
+				has_io_pattern = True
+			
+			pc_info += "\n"
+
+			if has_io_pattern:
+				pc_log_file.write(pc_info)
+
 		pc_log_file.close()
 
 
@@ -447,17 +470,11 @@ def main():
 			pcstat.syscalls_per_pc[code] = syscall_list
 
 			# add data access time to file_dict
-			if syscall.size <= PAGE_SIZE * 16 and syscall.type <= 3:
-				for i in range(0, syscall.size / PAGE_SIZE):
-					pos = (syscall.pos % PAGE_SIZE) + (PAGE_SIZE * i)
-					block_access_times = pcstat.get_block_access_times(syscall.filename, pos)
-					block_access_times.append(syscall.timestamp)
-					pcstat.set_block_access_times(syscall.filename, pos, block_access_times)
-
-		# write converted system call information to new file.
-		#f = open("logs/log_" + syscall.filename.split("/")[-1], "a")
-		#f_pc = open("logs/pc_" + syscall.filename.split("/")[-1], "a")
-		#syscall.print_syscall(f, f_pc)
+			for i in range(0, syscall.size / PAGE_SIZE):
+				pos = (syscall.pos % PAGE_SIZE) + (PAGE_SIZE * i)
+				block_access_times = pcstat.get_block_access_times(syscall.filename, pos)
+				block_access_times.append(syscall.timestamp)
+				pcstat.set_block_access_times(syscall.filename, pos, block_access_times)
 
 	pcstat.file_close()
 
