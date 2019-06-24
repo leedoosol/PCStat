@@ -139,7 +139,10 @@ int kernel_fgets(char* buf, struct file *filp)
 
 	while (1)
 	{
-		file_read(buf + len, 1, filp);
+		if (file_read(buf + len, 1, filp) != 1) {
+			break;
+		}
+
 		if (buf[len] == '\n')
 		{
 			buf[len] = 0;

@@ -22,22 +22,12 @@
 #include <asm/uaccess.h>
 #include <asm/unistd.h>
 
-typedef ssize_t (*io_fn_t)(struct file *, char __user *, size_t, loff_t *);
-typedef ssize_t (*iov_fn_t)(struct kiocb *, const struct iovec *,
-		unsigned long, loff_t);
-typedef ssize_t (*iter_fn_t)(struct kiocb *, struct iov_iter *);
+//#define PCSTAT
+#define PCADVISOR
 
-const struct file_operations generic_ro_fops = {
-	.llseek		= generic_file_llseek,
-	.read		= new_sync_read,
-	.read_iter	= generic_file_read_iter,
-	.mmap		= generic_file_readonly_mmap,
-	.splice_read	= generic_file_splice_read,
-};
+/***** ysjin added for PCStat I/O collection *****/
+#ifdef PCSTAT
 
-EXPORT_SYMBOL(generic_ro_fops);
-
-/***** ysjin added for syscall latency *****/
 #include <asm/percpu.h>
 #include <asm/syscall.h>
 #include <asm/ptrace.h>
@@ -76,7 +66,68 @@ int log_syscall_with_pc(unsigned int fd, struct file *file, unsigned int count,
 	return 0;
 }
 
-/***** *****/
+#endif /* PCSTAT */
+
+/***** ysjin added for pcadvisor *****/
+#ifdef PCADVISOR
+
+typedef int (*pre_advisor)(unsigned long, struct file*);
+static pre_advisor pcadv_pre_advisor;
+
+int set_pre_advisor (pre_advisor func)
+{
+	pcadv_pre_advisor = func;
+	return 0;
+}
+EXPORT_SYMBOL (set_pre_advisor);
+
+int pre_advise (unsigned long oldrsp, struct file* file)
+{
+	if (pcadv_pre_advisor != NULL)
+	{
+		return pcadv_pre_advisor (oldrsp, file);
+	}
+
+	return 0;
+}
+
+typedef void (*post_advisor)(int, struct file*, loff_t, unsigned int);
+static post_advisor pcadv_post_advisor;
+
+int set_post_advisor (post_advisor func)
+{
+	pcadv_post_advisor = func;
+	return 0;
+}
+EXPORT_SYMBOL (set_post_advisor);
+
+void post_advise (int opt_code, struct file* file, loff_t offset, unsigned int len)
+{
+	if (pcadv_post_advisor != NULL)
+	{
+		pcadv_post_advisor (opt_code, file, offset, len);
+	}
+}
+
+#endif /* PCADVISOR */
+
+/****** ysjin customization part finished ******/
+
+
+typedef ssize_t (*io_fn_t)(struct file *, char __user *, size_t, loff_t *);
+typedef ssize_t (*iov_fn_t)(struct kiocb *, const struct iovec *,
+		unsigned long, loff_t);
+typedef ssize_t (*iter_fn_t)(struct kiocb *, struct iov_iter *);
+
+const struct file_operations generic_ro_fops = {
+	.llseek		= generic_file_llseek,
+	.read		= new_sync_read,
+	.read_iter	= generic_file_read_iter,
+	.mmap		= generic_file_readonly_mmap,
+	.splice_read	= generic_file_splice_read,
+};
+
+EXPORT_SYMBOL(generic_ro_fops);
 
 
 static inline int unsigned_offsets(struct file *file)
@@ -599,21 +650,29 @@ static inline void file_pos_write(struct file *file, loff_t pos)
 	file->f_pos = pos;
 }
 
-#define MY_UID 1000
-
 SYSCALL_DEFINE3(read, unsigned int, fd, char __user *, buf, size_t, count)
 {
 	struct fd f = fdget_pos(fd);
 	ssize_t ret = -EBADF;
-	uid_t uid = get_current_user()->uid.val;
 	unsigned long oldrsp;
+#ifdef PCSTAT
 	ktime_t start, end;
+#endif
 
 	if (f.file) {
+#ifdef PCSTAT
 		/* ysjin added for measuring timestamp of given syscall */
-		if (uid == MY_UID) {
+		if (log_io_with_pc != NULL) {
 			start = ktime_get();
 		}
+#endif
+
+#ifdef PCADVISOR
+		/* ysjin added for pcadvisor */
+		int opt_code;
+		oldrsp = current_pt_regs()->sp;
+		opt_code = pre_advise(oldrsp, f.file);
+#endif
 
 		loff_t pos = file_pos_read(f.file);
 		loff_t prev_pos = pos;
@@ -622,12 +681,19 @@ SYSCALL_DEFINE3(read, unsigned int, fd, char __user *, buf, size_t, count)
 			file_pos_write(f.file, pos);
 		fdput_pos(f);
 
+#ifdef PCSTAT
 		/* ysjin added */
-		if (uid == MY_UID) {
+		if (log_io_with_pc != NULL) {
 			end = ktime_get();
 			oldrsp = current_pt_regs()->sp;
 			log_syscall_with_pc(fd, f.file, count, IO_READ, oldrsp, prev_pos, start, end);
 		}
+#endif
+
+#ifdef PCADVISOR
+		/* ysjin added for pcadvisor */
+		post_advise(opt_code, f.file, prev_pos, count);
+#endif
 	}
 	return ret;
 }
@@ -637,15 +703,25 @@ SYSCALL_DEFINE3(write, unsigned int, fd, const char __user *, buf,
 {
 	struct fd f = fdget_pos(fd);
 	ssize_t ret = -EBADF;
-	uid_t uid = get_current_user()->uid.val;
 	unsigned long oldrsp;
+#ifdef PCSTAT
 	ktime_t start, end;
+#endif
 
 	if (f.file) {
+#ifdef PCSTAT
 		/* ysjin added for measuring timestamp of given syscall */
-		if (uid == MY_UID) {
+		if (log_io_with_pc != NULL) {
 			start = ktime_get();
 		}
+#endif
+
+#ifdef PCADVISOR
+		/* ysjin added for pcadvisor */
+		int opt_code;
+		oldrsp = current_pt_regs()->sp;
+		opt_code = pre_advise(oldrsp, f.file);
+#endif
 
 		loff_t pos = file_pos_read(f.file);
 		loff_t prev_pos = pos;
@@ -654,12 +730,19 @@ SYSCALL_DEFINE3(write, unsigned int, fd, const char __user *, buf,
 			file_pos_write(f.file, pos);
 		fdput_pos(f);
 
+#ifdef PCSTAT
 		/* ysjin added */
-		if (uid == MY_UID) {
+		if (log_io_with_pc != NULL) {
 			end = ktime_get();
 			oldrsp = current_pt_regs()->sp;
 			log_syscall_with_pc(fd, f.file, count, IO_WRITE, oldrsp, prev_pos, start, end);
 		}
+#endif
+
+#ifdef PCADVISOR
+		/* ysjin added for pcadvisor */
+		post_advise(opt_code, f.file, prev_pos, count);
+#endif
 	}
 
 	return ret;
@@ -670,19 +753,29 @@ SYSCALL_DEFINE4(pread64, unsigned int, fd, char __user *, buf,
 {
 	struct fd f;
 	ssize_t ret = -EBADF;
-	uid_t uid = get_current_user()->uid.val;
 	unsigned long oldrsp;
+#ifdef PCSTAT
 	ktime_t start, end;
+#endif
 
 	if (pos < 0)
 		return -EINVAL;
 
 	f = fdget(fd);
 	if (f.file) {
+#ifdef PCSTAT
 		/* ysjin added for measuring timestamp of given syscall */
-		if (uid == MY_UID) {
+		if (log_io_with_pc != NULL) {
 			start = ktime_get();
 		}
+#endif
+
+#ifdef PCADVISOR
+		/* ysjin added for pcadvisor */
+		int opt_code;
+		oldrsp = current_pt_regs()->sp;
+		opt_code = pre_advise(oldrsp, f.file);
+#endif
 
 		loff_t prev_pos = pos;
 		ret = -ESPIPE;
@@ -690,12 +783,19 @@ SYSCALL_DEFINE4(pread64, unsigned int, fd, char __user *, buf,
 			ret = vfs_read(f.file, buf, count, &pos);
 		fdput(f);
 
+#ifdef PCSTAT
 		/* ysjin added */
-		if (uid == MY_UID) {
+		if (log_io_with_pc != NULL) {
 			end = ktime_get();
 			oldrsp = current_pt_regs()->sp;
 			log_syscall_with_pc(fd, f.file, count, IO_PREAD64, oldrsp, prev_pos, start, end);
 		}
+#endif
+
+#ifdef PCADVISOR
+		/* ysjin added for pcadvisor */
+		post_advise(opt_code, f.file, prev_pos, count);
+#endif
 	}
 
 	return ret;
@@ -706,19 +806,29 @@ SYSCALL_DEFINE4(pwrite64, unsigned int, fd, const char __user *, buf,
 {
 	struct fd f;
 	ssize_t ret = -EBADF;
-	uid_t uid = get_current_user()->uid.val;
 	unsigned long oldrsp;
+#ifdef PCSTAT
 	ktime_t start, end;
+#endif
 
 	if (pos < 0)
 		return -EINVAL;
 
 	f = fdget(fd);
 	if (f.file) {
+#ifdef PCSTAT
 		/* ysjin added for measuring timestamp of given syscall */
-		if (uid == MY_UID) {
+		if (log_io_with_pc != NULL) {
 			start = ktime_get();
 		}
+#endif
+
+#ifdef PCADVISOR
+		/* ysjin added for pcadvisor */
+		int opt_code;
+		oldrsp = current_pt_regs()->sp;
+		opt_code = pre_advise(oldrsp, f.file);
+#endif
 
 		loff_t prev_pos = pos;
 		ret = -ESPIPE;
@@ -726,12 +836,19 @@ SYSCALL_DEFINE4(pwrite64, unsigned int, fd, const char __user *, buf,
 			ret = vfs_write(f.file, buf, count, &pos);
 		fdput(f);
 
+#ifdef PCSTAT
 		/* ysjin added */
-		if (uid == MY_UID) {
+		if (log_io_with_pc != NULL) {
 			end = ktime_get();
 			oldrsp = current_pt_regs()->sp;
 			log_syscall_with_pc(fd, f.file, count, IO_PWRITE64, oldrsp, prev_pos, start, end);
 		}
+#endif
+
+#ifdef PCADVISOR
+		/* ysjin added for pcadvisor */
+		post_advise(opt_code, f.file, prev_pos, count);
+#endif
 	}
 
 	return ret;
@@ -993,15 +1110,25 @@ SYSCALL_DEFINE3(readv, unsigned long, fd, const struct iovec __user *, vec,
 {
 	struct fd f = fdget_pos(fd);
 	ssize_t ret = -EBADF;
-	uid_t uid = get_current_user()->uid.val;
 	unsigned long oldrsp;
+#ifdef PCSTAT
 	ktime_t start, end;
+#endif
 
 	if (f.file) {
+#ifdef PCSTAT
 		/* ysjin added for measuring timestamp of given syscall */
-		if (uid == MY_UID) {
+		if (log_io_with_pc != NULL) {
 			start = ktime_get();
 		}
+#endif
+
+#ifdef PCADVISOR
+		/* ysjin added for pcadvisor */
+		int opt_code;
+		oldrsp = current_pt_regs()->sp;
+		opt_code = pre_advise(oldrsp, f.file);
+#endif
 
 		loff_t pos = file_pos_read(f.file);
 		loff_t prev_pos = pos;
@@ -1010,12 +1137,19 @@ SYSCALL_DEFINE3(readv, unsigned long, fd, const struct iovec __user *, vec,
 			file_pos_write(f.file, pos);
 		fdput_pos(f);
 
+#ifdef PCSTAT
 		/* ysjin added */
-		if (uid == MY_UID) {
+		if (log_io_with_pc != NULL) {
 			end = ktime_get();
 			oldrsp = current_pt_regs()->sp;
 			log_syscall_with_pc(fd, f.file, vlen, IO_READV, oldrsp, prev_pos, start, end);
 		}
+#endif
+
+#ifdef PCADVISOR
+		/* ysjin added for pcadvisor */
+		post_advise(opt_code, f.file, prev_pos, vlen);
+#endif
 	}
 
 	if (ret > 0)
@@ -1029,15 +1163,25 @@ SYSCALL_DEFINE3(writev, unsigned long, fd, const struct iovec __user *, vec,
 {
 	struct fd f = fdget_pos(fd);
 	ssize_t ret = -EBADF;
-	uid_t uid = get_current_user()->uid.val;
 	unsigned long oldrsp;
+#ifdef PCSTAT
 	ktime_t start, end;
+#endif
 
 	if (f.file) {
+#ifdef PCSTAT
 		/* ysjin added for measuring timestamp of given syscall */
-		if (uid == MY_UID) {
+		if (log_io_with_pc != NULL) {
 			start = ktime_get();
 		}
+#endif
+
+#ifdef PCADVISOR
+		/* ysjin added for pcadvisor */
+		int opt_code;
+		oldrsp = current_pt_regs()->sp;
+		opt_code = pre_advise(oldrsp, f.file);
+#endif
 
 		loff_t pos = file_pos_read(f.file);
 		loff_t prev_pos = pos;
@@ -1046,12 +1190,19 @@ SYSCALL_DEFINE3(writev, unsigned long, fd, const struct iovec __user *, vec,
 			file_pos_write(f.file, pos);
 		fdput_pos(f);
 
+#ifdef PCSTAT
 		/* ysjin added */
-		if (uid == MY_UID) {
+		if (log_io_with_pc != NULL) {
 			end = ktime_get();
 			oldrsp = current_pt_regs()->sp;
 			log_syscall_with_pc(fd, f.file, vlen, IO_WRITEV, oldrsp, prev_pos, start, end);
 		}
+#endif
+
+#ifdef PCADVISOR
+		/* ysjin added for pcadvisor */
+		post_advise(opt_code, f.file, prev_pos, vlen);
+#endif
 	}
 
 	if (ret > 0)
@@ -1072,19 +1223,29 @@ SYSCALL_DEFINE5(preadv, unsigned long, fd, const struct iovec __user *, vec,
 	loff_t pos = pos_from_hilo(pos_h, pos_l);
 	struct fd f;
 	ssize_t ret = -EBADF;
-	uid_t uid = get_current_user()->uid.val;
 	unsigned long oldrsp;
+#ifdef PCSTAT
 	ktime_t start, end;
+#endif
 
 	if (pos < 0)
 		return -EINVAL;
 
 	f = fdget(fd);
 	if (f.file) {
+#ifdef PCSTAT
 		/* ysjin added for measuring timestamp of given syscall */
-		if (uid == MY_UID) {
+		if (log_io_with_pc != NULL) {
 			start = ktime_get();
 		}
+#endif
+
+#ifdef PCADVISOR
+		/* ysjin added for pcadvisor */
+		int opt_code;
+		oldrsp = current_pt_regs()->sp;
+		opt_code = pre_advise(oldrsp, f.file);
+#endif
 		loff_t prev_pos = pos;
 
 		ret = -ESPIPE;
@@ -1092,12 +1253,19 @@ SYSCALL_DEFINE5(preadv, unsigned long, fd, const struct iovec __user *, vec,
 			ret = vfs_readv(f.file, vec, vlen, &pos);
 		fdput(f);
 
+#ifdef PCSTAT
 		/* ysjin added */
-		if (uid == MY_UID) {
+		if (log_io_with_pc != NULL) {
 			end = ktime_get();
 			oldrsp = current_pt_regs()->sp;
 			log_syscall_with_pc(fd, f.file, vlen, IO_PREADV, oldrsp, prev_pos, start, end);
 		}
+#endif
+
+#ifdef PCADVISOR
+		/* ysjin added for pcadvisor */
+		post_advise(opt_code, f.file, prev_pos, vlen);
+#endif
 	}
 
 	if (ret > 0)
@@ -1112,19 +1280,29 @@ SYSCALL_DEFINE5(pwritev, unsigned long, fd, const struct iovec __user *, vec,
 	loff_t pos = pos_from_hilo(pos_h, pos_l);
 	struct fd f;
 	ssize_t ret = -EBADF;
-	uid_t uid = get_current_user()->uid.val;
 	unsigned long oldrsp;
+#ifdef PCSTAT
 	ktime_t start, end;
+#endif
 
 	if (pos < 0)
 		return -EINVAL;
 
 	f = fdget(fd);
 	if (f.file) {
+#ifdef PCSTAT
 		/* ysjin added for measuring timestamp of given syscall */
-		if (uid == MY_UID) {
+		if (log_io_with_pc != NULL) {
 			start = ktime_get();
 		}
+#endif
+
+#ifdef PCADVISOR
+		/* ysjin added for pcadvisor */
+		int opt_code;
+		oldrsp = current_pt_regs()->sp;
+		opt_code = pre_advise(oldrsp, f.file);
+#endif
 
 		loff_t prev_pos = pos;
 		ret = -ESPIPE;
@@ -1132,12 +1310,19 @@ SYSCALL_DEFINE5(pwritev, unsigned long, fd, const struct iovec __user *, vec,
 			ret = vfs_writev(f.file, vec, vlen, &pos);
 		fdput(f);
 
+#ifdef PCSTAT
 		/* ysjin added */
-		if (uid == MY_UID) {
+		if (log_io_with_pc != NULL) {
 			end = ktime_get();
 			oldrsp = current_pt_regs()->sp;
 			log_syscall_with_pc(fd, f.file, vlen, IO_PWRITEV, oldrsp, prev_pos, start, end);
 		}
+#endif
+
+#ifdef PCADVISOR
+		/* ysjin added for pcadvisor */
+		post_advise(opt_code, f.file, prev_pos, vlen);
+#endif
 	}
 
 	if (ret > 0)

@@ -351,11 +351,17 @@ class PCStat:
 			# set this PC to 'sequential' if average of seq_depth_list is larger than threshold.
 			avg_seq_depth = sum(seq_depth_list) / (float)(len(seq_depth_list))
 			if avg_seq_depth >= 4:
-				pc_info += "SEQUENTIAL "
+				if MAKE_CONFIGURATION:
+					pc_info += "1 "
+				else:
+					pc_info += "SEQUENTIAL "
 				has_io_pattern = True
 			elif avg_seq_depth <= 1 and avg_io_size <= PAGE_SIZE * 4:
 				# random only has meaning when I/O is small enough.
-				pc_info += "RANDOM "
+				if MAKE_CONFIGURATION:
+					pc_info += "2 "
+				else:
+					pc_info += "RANDOM "
 				has_io_pattern = True
 
 			# get block's access frequency
@@ -370,10 +376,16 @@ class PCStat:
 
 			avg_ref_recency = avg_ref_recency / 100000000.0
 			if avg_ref_recency < 0:
-				pc_info += "DONTNEED"
+				if MAKE_CONFIGURATION:
+					pc_info += "3"
+				else:
+					pc_info += "DONTNEED"
 				has_io_pattern = True
 			elif avg_ref_recency < 0.001:
-				pc_info += "WILLNEED"
+				if MAKE_CONFIGURATION:
+					pc_info += "4"
+				else:
+					pc_info += "WILLNEED"
 				has_io_pattern = True
 			
 			pc_info += "\n"
