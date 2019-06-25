@@ -111,7 +111,7 @@ static unsigned long calculate_pc_sig(unsigned long oldrsp)
 			/* check if the address stored in stack is inside the code segment */
 			if(mm->start_code < value && value < mm->end_code) {
 				/* add up the PC value. */
-				pc_sig = value - mm->start_code;
+				pc_sig += value - mm->start_code;
 	
 				num_addr++;
 				if(num_addr > NUM_RET_ADDR_THRESHOLD)
@@ -224,15 +224,13 @@ static int pcadvisor_pre_advise(unsigned long oldrsp, struct file* file)
 		file->f_ra.ra_pages = bdi->ra_pages * 2;
 		spin_lock (&file->f_lock);
 		file->f_mode &= ~FMODE_RANDOM;
-		spin_lock (&file->f_lock);
-		printk(KERN_INFO "[PCAdvise] SEQUENTIAL\n");
+		spin_unlock (&file->f_lock);
 	}
 	else if (entry->mode1 == 2) { /* RANDOM */
 		/* set file configuration to 'random'. */
 		spin_lock (&file->f_lock);
 		file->f_mode |= FMODE_RANDOM;
-		spin_lock (&file->f_lock);
-		printk(KERN_INFO "[PCAdvise] RANDOM\n");
+		spin_unlock (&file->f_lock);
 	}
 	else {
 		/* mode1 must stand for WILLNEED/DONTNEED. */
@@ -331,7 +329,7 @@ static void pcadvisor_post_advise(int opt_code, struct file* file, loff_t offset
 				invalidate_mapping_pages(mapping, start_index, end_index);
 			}
 		}
-		printk(KERN_INFO "[PCAdvise] DONTNEED\n");
+		//printk(KERN_INFO "[PCAdvisor] DONTNEED\n");
 	}
 	else if (opt_code == 4) { /* WILLNEED */
 		start_index = offset >> PAGE_SHIFT;
@@ -345,7 +343,7 @@ static void pcadvisor_post_advise(int opt_code, struct file* file, loff_t offset
 
 		/* ignore return value. */
 		force_page_cache_readahead (mapping, file, start_index, nrpages);
-		printk(KERN_INFO "[PCAdvise] WILLNEED\n");
+		//printk(KERN_INFO "[PCAdvisor] WILLNEED\n");
 	}
 }
 
@@ -364,8 +362,6 @@ static int pcadvisor_init(void)
 	/* enable PC optimization */
 	set_post_advisor (pcadvisor_post_advise);
 	set_pre_advisor (pcadvisor_pre_advise);
-	get_entry(table, 3493440);
-	get_entry(table, 3178717);
 
 	printk(KERN_INFO "[PCAdvisor] init module\n");
 
