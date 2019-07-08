@@ -25,7 +25,7 @@ PAGE_SIZE = 4096
 SEQUENTIAL_THRESHOLD = 4
 PC_INTO_SIGNATURE = True
 MAKE_CONFIGURATION = True
-MAJOR_PC_IO_SIZE = PAGE_SIZE * 16
+MAJOR_PC_IO_SIZE = PAGE_SIZE * 128
 
 # temporary function for storing PC.
 def symbols_into_string(pcs):
@@ -349,20 +349,21 @@ class PCStat:
 				pc_info += "\t\tI/O Pattern: "
 
 			# set this PC to 'sequential' if average of seq_depth_list is larger than threshold.
-			avg_seq_depth = sum(seq_depth_list) / (float)(len(seq_depth_list))
-			if avg_seq_depth >= 4:
-				if MAKE_CONFIGURATION:
-					pc_info += "1 "
-				else:
-					pc_info += "SEQUENTIAL "
-				has_io_pattern = True
-			elif avg_seq_depth <= 1 and avg_io_size <= PAGE_SIZE * 4:
-				# random only has meaning when I/O is small enough.
-				if MAKE_CONFIGURATION:
-					pc_info += "2 "
-				else:
-					pc_info += "RANDOM "
-				has_io_pattern = True
+			if io_type <= 3: # only give hint on SEQ/RAND for reads. writes cannot be affected.
+				avg_seq_depth = sum(seq_depth_list) / (float)(len(seq_depth_list))
+				if avg_seq_depth >= 4:
+					if MAKE_CONFIGURATION:
+						pc_info += "1 "
+					else:
+						pc_info += "SEQUENTIAL "
+					has_io_pattern = True
+				elif avg_seq_depth <= 1 and avg_io_size <= PAGE_SIZE * 4:
+					# random only has meaning when I/O is small enough.
+					if MAKE_CONFIGURATION:
+						pc_info += "2 "
+					else:
+						pc_info += "RANDOM "
+					has_io_pattern = True
 
 			# get block's access frequency
 			avg_ref_recency = -100000000

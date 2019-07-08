@@ -98,7 +98,7 @@ void log_io_syscall_with_pc(unsigned int fd, struct file *filp, unsigned int cou
 	char *tmp_page, *path;
 
 	/* only capture I/O syscall from selected process */
-	if(strcmp(current->comm, "pc_test") != 0)
+	if(strcmp(current->comm, "db_test") != 0)
 		return;
 
 	/* skip if the I/O size is 0 */

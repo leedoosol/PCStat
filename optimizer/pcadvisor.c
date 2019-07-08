@@ -210,6 +210,10 @@ static int pcadvisor_pre_advise(unsigned long oldrsp, struct file* file)
 	unsigned long pc_sig;
 	pc_entry* entry;
 
+	/* only capture I/O syscall from selected process */
+	if(strcmp(current->comm, "db_bench") != 0)
+		return 0;
+
 	bdi = inode_to_bdi(file->f_mapping->host);
 
 	/* calculate pc signature, find in table. */
@@ -221,10 +225,10 @@ static int pcadvisor_pre_advise(unsigned long oldrsp, struct file* file)
 	/* set sequential/random according to the mode. */
 	if (entry->mode1 == 1) { /* SEQUENTIAL */
 		/* enlarge the limit of readahead size. */
-		file->f_ra.ra_pages = bdi->ra_pages * 2;
-		spin_lock (&file->f_lock);
-		file->f_mode &= ~FMODE_RANDOM;
-		spin_unlock (&file->f_lock);
+//		file->f_ra.ra_pages = bdi->ra_pages * 2;
+//		spin_lock (&file->f_lock);
+//		file->f_mode &= ~FMODE_RANDOM;
+//		spin_unlock (&file->f_lock);
 	}
 	else if (entry->mode1 == 2) { /* RANDOM */
 		/* set file configuration to 'random'. */
