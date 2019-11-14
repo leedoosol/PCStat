@@ -450,6 +450,7 @@ def main():
 	num_syscall = 0
 
 	while True:
+		#1.  시스템콜 하나가 만들어낸 한 줄 을 읽는다.
 		line = pcstat.readline()
 		if not line:
 			break
@@ -471,11 +472,14 @@ def main():
 			continue
 
 		# add syscall information to pc_dict
+	   	# 2. 그 system call이 겪은 pc들에 해당하는 code값을 convert_pc_symbol_into_code()에서 pc_dict[]에서 찾아서 
+	 	# code값을 리턴한다. 
 		if PC_INTO_SIGNATURE:
 			code = syscall.code
 		else:
 			code = pcstat.convert_pc_symbol_into_code(syscall.pcs)
 		if code >= 0:
+			# 3. 그 code에 해당하는 syscall_list(즉, func name으로 확인까지 마친(common_pcs확인))를 가지고 분석
 			syscall_list = list()
 			if code in pcstat.syscalls_per_pc:
 				syscall_list = pcstat.syscalls_per_pc[code]
