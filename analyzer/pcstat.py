@@ -479,7 +479,7 @@ def main():
 		else:
 			code = pcstat.convert_pc_symbol_into_code(syscall.pcs)
 		if code >= 0:
-			# 3. 그 code에 해당하는 syscall_list(즉, func name으로 확인까지 마친(common_pcs확인))를 가지고 분석
+			# 3. 그 code에 해당하는 syscall_list(즉, func name으로 확인까지 마친(common_symbols확인))를 가지고 분석
 			syscall_list = list()
 			if code in pcstat.syscalls_per_pc:
 				syscall_list = pcstat.syscalls_per_pc[code]
