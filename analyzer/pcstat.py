@@ -135,6 +135,7 @@ class PCStat:
 	# get the symbols from given pcs.
 	# keys[]의 value는 아마도 pc값이고, 
 	# 이 함수의 intput: 한 system call의 거쳐온 pc값들, output: func_name들로 바꾼 값들
+	# 이렇게 거르는 이유는, 크기가 0인 function pointer(허수 함수들)을 피하기 위함으로 보인다.
 	def convert_pc_to_symbol(self, pcs):
 		ret = list()
 		keys = self.sorted_keys
