@@ -133,6 +133,8 @@ class PCStat:
 
 
 	# get the symbols from given pcs.
+	# keys[]의 value는 아마도 pc값이고, 
+	# 이 함수의 intput: system call의 거쳐온 pc값들, output: func_name들로 바꾼 값들
 	def convert_pc_to_symbol(self, pcs):
 		ret = list()
 		keys = self.sorted_keys
