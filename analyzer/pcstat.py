@@ -252,6 +252,7 @@ class PCStat:
 
 
 	# get block access times from pcstat
+	# 인자로 들어온 pos는 syscall.pos가 아니다. block이다. main()에서 이 함수 호출 부분 확인
 	def get_block_access_times(self, filename, pos):
 		block_access_times = list()
 
