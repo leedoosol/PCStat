@@ -491,7 +491,7 @@ def main():
 			pcstat.syscalls_per_pc[code] = syscall_list
 
 			# add data access time to file_dict
-			# 여기서 get_block_access_times()의 인자 pos는 syscall.pos로부터 계산한 block no이다.
+			# 
 			for i in range(0, syscall.size / PAGE_SIZE):
 				pos = (syscall.pos % PAGE_SIZE) + (PAGE_SIZE * i)
 				block_access_times = pcstat.get_block_access_times(syscall.filename, pos)
