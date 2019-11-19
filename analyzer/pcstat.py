@@ -491,7 +491,7 @@ def main():
 
 			# add data access time to file_dict
 			# 만일 size가 5000이라면, 두개의 블럭(블럭사이즈:4096)에 접근하는 것이니 두개의 블럭에 대해 시간 갱신
-			 
+			# pos=100, size=4097이라면, pos = 100, 4196이 된다.
 			for i in range(0, syscall.size / PAGE_SIZE):
 				pos = (syscall.pos % PAGE_SIZE) + (PAGE_SIZE * i)
 				block_access_times = pcstat.get_block_access_times(syscall.filename, pos)
