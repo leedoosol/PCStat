@@ -323,6 +323,8 @@ class PCStat:
 
 				# set sequentiality depth if matches.
 				# sequentiality doesnt matter when I/O size is too small, so ignore small I/Os.
+				# RockDB의 경우에 size가 PAGE_SIZE보다 작은데도 불구하고 연속성을 보이는 경우가 있어서
+				# 나의 코드에서는 'size >= PAGE_SIZE' 부분은 뺀다
 				if filename == syscall.filename and sector == cur_sector and size >= PAGE_SIZE:
 					seq_depth += 1
 					if cnt == len(syscalls):
