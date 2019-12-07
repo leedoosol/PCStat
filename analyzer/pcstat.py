@@ -272,7 +272,8 @@ class PCStat:
 		blocks[pos] = block_access_times
 		self.file_dict[filename] = blocks
 
-	# file은 block들로 이루어져 있고, 각 block마다 접근 된 시간들을 근거로 referency_recency를 계산?
+	# file은 block들로 이루어져 있고, 각 block마다 접근 된 시간들을 모두 더해서 접근된 횟수로 나눈다. 자주 참조되는 block의 경우
+	# 이 값의 크기는 높을 것으로 
 	def calculate_block_reref_time(self):
 		for filename in self.file_dict.keys():
 			blocks = self.file_dict[filename]
@@ -376,7 +377,8 @@ class PCStat:
 				blocks = self.file_dict[syscall.filename]
 				for i in range(0, syscall.size / PAGE_SIZE):
 					sector = (syscall.pos % PAGE_SIZE) + (i * PAGE_SIZE)
-					if sector in blocks:
+					#syscall이 접근한 sector(block)를 blocks배열에서 찾는다. 그 블럭이 재참조가 잘 되는 블럭인지 봄
+					if sector in blocks: 
 						if avg_ref_recency < blocks[sector]:
 							avg_ref_recency = blocks[sector]
 
