@@ -272,7 +272,7 @@ class PCStat:
 		blocks[pos] = block_access_times
 		self.file_dict[filename] = blocks
 
-
+	# file은 block들로 이루어져 있고, 각 block마다 접근 된 시간들을 근거로 referency_recency를 계산?
 	def calculate_block_reref_time(self):
 		for filename in self.file_dict.keys():
 			blocks = self.file_dict[filename]
